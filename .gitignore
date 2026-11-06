@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.production
+*.local
+backend/uploads/*
+!backend/uploads/.gitkeep
+frontend/dev-dist/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+.vercel

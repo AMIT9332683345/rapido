@@ -1,0 +1,6 @@
+.cache/
+osrm/
+*.pmtiles
+*.osm.pbf
+*.osrm
+*.osrm.*

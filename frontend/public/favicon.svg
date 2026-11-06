@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Amit bike taxi">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#08211f" />
+      <stop offset="1" stop-color="#123630" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <circle cx="371" cy="146" r="64" fill="#ffb020" />
+  <circle cx="256" cy="330" r="186" fill="none" stroke="#f7f3e8" stroke-opacity="0.16" stroke-width="3" />
+  <g fill="none" stroke="#f7f3e8" stroke-width="19" stroke-linecap="round">
+    <circle cx="148" cy="352" r="52" />
+    <circle cx="366" cy="352" r="52" />
+    <path d="M148 352 246 258 334 258 366 352" />
+    <path d="M246 258 208 352" />
+    <path d="M334 258 342 216" />
+    <path d="M314 216h57" />
+    <path d="M226 246h46" stroke-width="25" />
+  </g>
+  <circle cx="148" cy="352" r="11" fill="#ffb020" />
+</svg>
