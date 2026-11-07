@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { WifiOff } from 'lucide-react';
 import { ToastProvider } from './context/ToastContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { homeForRole } from './lib/session';
 import { SocketProvider } from './context/SocketContext';
 import { RequireRole } from './components/RequireRole';
 import { MobileShell } from './components/layout';
@@ -32,6 +33,11 @@ import AdminFare from './pages/admin/AdminFare';
 import AdminServiceArea from './pages/admin/AdminServiceArea';
 import AdminReports from './pages/admin/AdminReports';
 import NotFound from './pages/shared/NotFound';
+
+function HomeEntry() {
+  const { role } = useAuth();
+  return <Navigate to={role ? homeForRole(role) : '/app'} replace />;
+}
 
 function CustomerShell() {
   return (
@@ -92,18 +98,21 @@ export default function App() {
             <ScrollToTop />
             <OfflineBanner />
             <Routes>
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<HomeEntry />} />
+              <Route path="/about" element={<Landing />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
 
-              <Route element={<RequireRole role="customer" />}>
-                <Route path="/app/ride/:id" element={<CustomerRide />} />
-                <Route path="/app" element={<CustomerShell />}>
-                  <Route index element={<CustomerHome />} />
+              <Route path="/app" element={<CustomerShell />}>
+                <Route index element={<CustomerHome />} />
+                <Route element={<RequireRole role="customer" />}>
                   <Route path="rides" element={<CustomerRides />} />
                   <Route path="offers" element={<CustomerOffers />} />
                   <Route path="profile" element={<CustomerProfile />} />
                 </Route>
+              </Route>
+              <Route element={<RequireRole role="customer" />}>
+                <Route path="/app/ride/:id" element={<CustomerRide />} />
               </Route>
 
               <Route element={<RequireRole role="rider" />}>

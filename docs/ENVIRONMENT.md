@@ -16,14 +16,14 @@ cp frontend/.env.example frontend/.env
 | --- | --- | --- | --- |
 | `NODE_ENV` | no | `development` | `development`, `test`, or `production` |
 | `PORT` | no | `5000` | Render supplies its own port |
-| `APP_NAME` | no | `Amit` | Shown in API metadata; editable brand |
+| `APP_NAME` | no | `Flash` | Shown in API metadata; editable brand |
 | `MONGODB_URI` | **yes** | — | Atlas connection string including the database name |
 | `JWT_SECRET` | **yes** | — | At least 32 characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
 | `JWT_EXPIRES_IN` | no | `7d` | Any `jsonwebtoken` duration |
 | `FRONTEND_URL` | no | `http://localhost:5173` | Primary allowed CORS origin |
 | `FRONTEND_URLS` | no | — | Comma-separated extra origins (previews, custom domain) |
 | `PUBLIC_BASE_URL` | no | — | External URL of the API if absolute URLs are needed |
-| `ADMIN_NAME` | no | `Amit Admin` | Used only when bootstrapping |
+| `ADMIN_NAME` | no | `Admin` | Used only when bootstrapping |
 | `ADMIN_MOBILE` | no | — | Bootstrap admin mobile (10 digits, starts 6–9) |
 | `ADMIN_PASSWORD` | no | — | Bootstrap password, min 8 chars. No default password exists |
 | `OSRM_BASE_URL` | no | public demo | Must be your self-hosted OSRM in production |
@@ -32,9 +32,9 @@ cp frontend/.env.example frontend/.env
 | `BOOKING_OFFER_SECONDS` | no | `60` | Time a rider has to accept an offer |
 | `BOOKING_SEARCH_MINUTES` | no | `4` | Total dispatch window before expiry |
 | `RIDE_REQUEST_MAX_ROUNDS` | no | `6` | Re-offer rounds |
-| `OSM_USER_AGENT` | no | `AmitRide/1.0` | Nominatim requires a descriptive UA |
+| `OSM_USER_AGENT` | no | `FlashRide/1.0` | Nominatim requires a descriptive UA |
 | `SUPPORT_PHONE` | no | — | Shown in the apps |
-| `SUPPORT_EMAIL` | no | `support@amitride.local` | Shown in the apps |
+| `SUPPORT_EMAIL` | no | — | Shown in the apps when set; hidden when empty |
 | `UPLOAD_DIR` | no | `uploads` | Relative to the process cwd, or absolute (Render disk) |
 | `MAP_PMTILES_URL` | no | — | Reported by `/api/config`; the frontend build uses `VITE_MAP_PMTILES_URL` |
 | `MAP_STYLE_URL` | no | — | Reported by `/api/config` |
@@ -80,7 +80,7 @@ Vite embeds these at **build time**. Rebuild after changing any value.
 | --- | --- | --- | --- |
 | `VITE_API_URL` | no | `http://localhost:5000/api` | Full API base including `/api` |
 | `VITE_SOCKET_URL` | no | `http://localhost:5000` | API origin for Socket.IO |
-| `VITE_APP_NAME` | no | `Amit` | Editable brand |
+| `VITE_APP_NAME` | no | `Flash` | Editable brand |
 | `VITE_APP_TAGLINE` | no | `Bike taxi for the islands` | Landing page tagline |
 | `VITE_MAP_STYLE_URL` | no | OpenFreeMap Liberty | No API key required |
 | `VITE_MAP_PMTILES_URL` | no | — | When set, overrides the style with a self-hosted PMTiles archive |

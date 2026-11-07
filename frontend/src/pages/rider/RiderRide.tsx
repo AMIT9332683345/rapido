@@ -10,6 +10,8 @@ import {
   Navigation,
   Phone,
   Play,
+  Volume2,
+  VolumeX,
   Wallet,
   XCircle,
 } from 'lucide-react';
@@ -24,6 +26,7 @@ import {
   ConfirmDialog,
   EmptyState,
   FullPageLoader,
+  Spinner,
   StatusPill,
 } from '../../components/ui';
 import { useSocket, useSocketEvent } from '../../context/SocketContext';
@@ -32,6 +35,8 @@ import { api, errorMessage } from '../../lib/api';
 import { dateTime, km, minutes, money } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import { useRiderGps } from '../../lib/useRiderGps';
+import { useNavigation } from '../../lib/useNavigation';
+import { accurateFix, maneuverDistance } from '../../lib/navigation';
 import type { Booking } from '../../types';
 
 export default function RiderRide() {
@@ -47,9 +52,10 @@ export default function RiderRide() {
     (signal) => api.get<{ booking: Booking }>(`/rider/bookings/${id}`, { signal }),
     [id],
   );
-  const booking = query.data?.booking ?? null;
-
-  const gps = useRiderGps({ tracking: Boolean(booking), broadcast: Boolean(booking) });
+  const booking = query.data?.booking.id === id ? query.data.booking : null;
+  const active = Boolean(booking && ['ACCEPTED', 'RIDER_ARRIVING', 'RIDER_ARRIVED', 'IN_PROGRESS'].includes(booking.status));
+  const gps = useRiderGps({ tracking: active, broadcast: active });
+  const navigation = useNavigation(booking, gps.error ? null : gps.position);
 
   useEffect(() => {
     if (!id) return;
@@ -77,17 +83,15 @@ export default function RiderRide() {
     [id, query, toast],
   );
 
-  const cancel = async (reason: string) => {
-    setBusy('cancel');
+  const release = async (reason: string) => {
+    setBusy('release');
     try {
-      const result = await api.post<{ booking: Booking }>(`/rider/bookings/${id}/cancel`, {
-        reason,
-      });
-      query.setData({ booking: result.booking });
+      await api.post(`/rider/bookings/${id}/release`, { reason });
       setCancelOpen(false);
-      toast.info('Ride released. Support has been notified.');
+      toast.info('Ride released. It is back with nearby riders.');
+      navigate('/rider');
     } catch (error) {
-      toast.error(errorMessage(error), 'Could not cancel');
+      toast.error(errorMessage(error), 'Could not release the ride');
     } finally {
       setBusy(null);
     }
@@ -165,7 +169,7 @@ export default function RiderRide() {
         <MapView
           center={gps.position ?? (booking.status === 'IN_PROGRESS' ? booking.destination : booking.pickup)}
           markers={markers}
-          route={booking.route.geometry}
+          route={navigation.route?.geometry ?? booking.route.geometry}
           self={gps.position ? { lat: gps.position.lat, lng: gps.position.lng } : null}
           fit="auto"
           fitKey={`${booking.status}-${gps.position ? 'gps' : 'static'}`}
@@ -216,6 +220,74 @@ export default function RiderRide() {
             <p className="rounded-2xl bg-danger-100 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-danger">
               {gps.error} Live location is paused.
             </p>
+          ) : null}
+
+          {navigation.target ? (
+            <Card className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10.5px] font-semibold uppercase tracking-[0.13em] text-muted">
+                  Route to {navigation.target.label}
+                </p>
+                {navigation.voiceSupported ? (
+                  <button
+                    type="button"
+                    onClick={navigation.toggleVoice}
+                    aria-pressed={navigation.voiceEnabled}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1.5 text-[11.5px] font-semibold text-ink"
+                  >
+                    {navigation.voiceEnabled ? (
+                      <Volume2 size={14} className="text-teal" />
+                    ) : (
+                      <VolumeX size={14} className="text-muted" />
+                    )}
+                    Voice {navigation.voiceEnabled ? 'on' : 'off'}
+                  </button>
+                ) : null}
+              </div>
+
+              {navigation.loading ? (
+                <p role="status" className="flex items-center gap-2 text-[12.5px] text-muted">
+                  <Spinner size={15} /> Finding the road route…
+                </p>
+              ) : navigation.error ? (
+                <div className="space-y-2">
+                  <p role="alert" className="rounded-2xl bg-danger-100 px-3 py-2 text-[12px] leading-relaxed text-danger">
+                    {navigation.error}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={navigation.retry}>
+                    Reload directions
+                  </Button>
+                </div>
+              ) : navigation.progress ? (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-mango-600">
+                    {maneuverDistance(navigation.progress.distanceToManeuverMeters)}
+                  </p>
+                  <p className="text-[15px] font-semibold leading-snug text-ink">
+                    {navigation.progress.nextStep.instruction}
+                  </p>
+                  <p className="text-[12px] text-muted">
+                    {km(navigation.progress.remainingMeters)} left · about{' '}
+                    {minutes(navigation.progress.remainingSeconds)}
+                  </p>
+                  {navigation.progress.deviationMeters >= 60 ? (
+                    <p className="rounded-2xl bg-danger-100 px-3 py-2 text-[12px] leading-relaxed text-danger">
+                      Off route by {Math.round(navigation.progress.deviationMeters)} m. Directions
+                      recalculate once your position updates.
+                    </p>
+                  ) : null}
+                </div>
+              ) : gps.position && !accurateFix(gps.position) ? (
+                <p className="text-[12px] leading-relaxed text-muted">
+                  Your GPS is too rough for turn directions. Move somewhere open and this updates by
+                  itself.
+                </p>
+              ) : (
+                <p className="text-[12px] leading-relaxed text-muted">
+                  Turn directions start as soon as your location updates.
+                </p>
+              )}
+            </Card>
           ) : null}
 
           {!completed && !cancelled ? (
@@ -392,8 +464,8 @@ export default function RiderRide() {
         confirmLabel="Release ride"
         cancelLabel="Keep ride"
         tone="danger"
-        loading={busy === 'cancel'}
-        onConfirm={() => void cancel('Released by rider')}
+        loading={busy === 'release'}
+        onConfirm={() => void release('Released by rider')}
       />
     </div>
   );

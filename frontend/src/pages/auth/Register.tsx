@@ -9,6 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { errorMessage } from '../../lib/api';
 import { homeForRole } from '../../lib/session';
 import type { Role } from '../../types';
+import { APP_NAME } from '../../config';
 
 type RegisterRole = 'customer' | 'rider';
 
@@ -98,7 +99,7 @@ export default function Register() {
           mobile: mobile.replace(/\D/g, ''),
           password,
         });
-        toast.success(`Welcome to Amit, ${result.user.name.split(' ')[0]}.`);
+        toast.success(`Welcome to ${APP_NAME}, ${result.user.name.split(' ')[0]}.`);
         navigate(homeForRole(result.role), { replace: true });
       }
     } catch (err) {
@@ -124,7 +125,7 @@ export default function Register() {
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Amit Mondal"
+            placeholder="Your full name"
             autoComplete="name"
             icon={<UserRound size={17} />}
             disabled={busy}

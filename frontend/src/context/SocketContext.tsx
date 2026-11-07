@@ -59,7 +59,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     instance.on('connect_error', () => setConnected(false));
 
     instance.on('notification', (payload: AppNotification) => {
-      window.dispatchEvent(new CustomEvent('amit:notification', { detail: payload }));
+      window.dispatchEvent(new CustomEvent('flash:notification', { detail: payload }));
       if (document.visibilityState === 'hidden') {
         const link =
           payload.data?.link ||

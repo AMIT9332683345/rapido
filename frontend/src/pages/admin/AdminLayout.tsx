@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { cn, IconButton, Sheet } from '../../components/ui';
+import { APP_NAME } from '../../config';
 
 const NAV = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -84,7 +85,7 @@ export default function AdminLayout() {
             </span>
             <span>
               <span className="block font-display text-[19px] font-semibold leading-none text-cream">
-                Amit<span className="text-mango">.</span>
+                {APP_NAME}<span className="text-mango">.</span>
               </span>
               <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.16em] text-cream/40">
                 Operations
@@ -139,7 +140,7 @@ export default function AdminLayout() {
               {current?.label ?? 'Admin'}
             </p>
             <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-              Amit operations
+              {APP_NAME} operations
             </p>
           </div>
           <span className="grid h-9 w-9 place-items-center rounded-full bg-ink text-mango">

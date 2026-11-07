@@ -63,6 +63,26 @@ export async function vehicleForRider(riderId: unknown) {
   return VehicleModel.findOne({ rider: riderId }).lean();
 }
 
+export function bookingMatching(booking: any) {
+  const notified = new Set<string>();
+  const accepted = new Set<string>();
+  const declined = new Set<string>();
+  for (const offer of booking.offers ?? []) {
+    const rider = offer.rider?._id ?? offer.rider;
+    if (!rider) continue;
+    const id = String(rider);
+    notified.add(id);
+    if (offer.response === 'accepted') accepted.add(id);
+    if (offer.response === 'rejected') declined.add(id);
+  }
+  return {
+    nearby: booking.nearbyRiderCount ?? 0,
+    notified: notified.size,
+    accepted: accepted.size,
+    declined: declined.size,
+  };
+}
+
 export async function serializeBooking(booking: any, role: Role) {
   const riderRaw = booking.rider;
   const riderId = riderRaw?._id ?? riderRaw;
@@ -101,6 +121,7 @@ export async function serializeBooking(booking: any, role: Role) {
     id: String(booking._id),
     code: booking.bookingCode,
     status: booking.status,
+    matching: bookingMatching(booking),
     customer,
     rider,
     pickup: placeView(booking.pickup),

@@ -3,6 +3,7 @@ import { Compass, House } from 'lucide-react';
 import { Button, EmptyState } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { homeForRole } from '../../lib/session';
+import { APP_NAME } from '../../config';
 
 export default function NotFound() {
   const { session } = useAuth();
@@ -21,7 +22,7 @@ export default function NotFound() {
             This lane does not exist
           </h1>
           <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
-            The page you followed is not part of Amit. Head back to your dashboard or the home page.
+            The page you followed is not part of {APP_NAME}. Head back to your dashboard or the home page.
           </p>
         </div>
         <div className="flex flex-col gap-2">
@@ -31,7 +32,7 @@ export default function NotFound() {
             </Button>
           </Link>
           <Link to="/" className="text-[12.5px] font-semibold text-muted hover:text-ink">
-            About Amit
+            About {APP_NAME}
           </Link>
         </div>
       </div>

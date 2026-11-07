@@ -12,7 +12,10 @@ import { isValidLatLng, toGeoPoint } from '../utils/geo.js';
 import {
   activeBookingForCustomer,
   cancelBooking,
+  confirmBookingDestination,
   createBooking,
+  estimateBookingCancellation,
+  estimateBookingDestination,
   getBookingForActor,
   pushBookingState,
 } from '../services/bookingService.js';
@@ -191,13 +194,46 @@ router.post(
   '/bookings/:id/cancel',
   asyncHandler(async (req, res) => {
     const body = z
-      .object({ reason: z.string().trim().max(300).optional() })
+      .object({
+        reason: z.string().trim().max(300).optional(),
+        expectedFee: z.number().min(0).max(100000).optional(),
+        revision: z.string().trim().max(80).optional(),
+      })
       .parse(req.body ?? {});
     const booking = await cancelBooking(req.params.id, {
       role: 'customer',
       id: req.auth!.id,
       reason: body.reason,
+      expectedFee: body.expectedFee,
+      revision: body.revision,
     });
+    res.json({ booking });
+  }),
+);
+
+router.post(
+  '/bookings/:id/cancel/estimate',
+  asyncHandler(async (req, res) => {
+    res.json(await estimateBookingCancellation(req.params.id, req.auth!.id));
+  }),
+);
+
+router.post(
+  '/bookings/:id/destination/estimate',
+  asyncHandler(async (req, res) => {
+    const body = z.object({ destination: placeSchema }).parse(req.body);
+    const quote = await estimateBookingDestination(req.params.id, req.auth!.id, body.destination);
+    res.json({ quote });
+  }),
+);
+
+router.post(
+  '/bookings/:id/destination',
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({ quoteToken: z.string().trim().min(20).max(4096) })
+      .parse(req.body);
+    const booking = await confirmBookingDestination(req.params.id, req.auth!.id, body.quoteToken);
     res.json({ booking });
   }),
 );

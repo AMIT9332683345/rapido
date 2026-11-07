@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import MapView, { type MapMarker } from '../../components/MapView';
 import PlaceSearch from '../../components/PlaceSearch';
+import LocationPicker from '../../components/LocationPicker';
 import NotificationsButton from '../../components/NotificationsButton';
 import { MapTopBar } from '../../components/layout';
 import { Button, Card, Field, Sheet, Spinner, Textarea, Badge, cn } from '../../components/ui';
@@ -40,13 +41,11 @@ import type {
 
 type Target = 'pickup' | 'destination';
 
-function fallbackPlace(): Place {
-  return {
-    label: SERVICE_LOCATION,
-    address: null,
-    lat: DEFAULT_CENTER.lat,
-    lng: DEFAULT_CENTER.lng,
-  };
+function greeting(name?: string | null) {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const first = name?.trim().split(/\s+/)[0];
+  return first ? `${part}, ${first}` : part;
 }
 
 export default function CustomerHome() {
@@ -62,8 +61,9 @@ export default function CustomerHome() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [booking, setBooking] = useState(false);
   const [locating, setLocating] = useState(true);
+  const [locationUnavailable, setLocationUnavailable] = useState(false);
   const [self, setSelf] = useState<{ lat: number; lng: number } | null>(null);
-  const reverseToken = useRef(0);
+  const reverseToken = useRef({ pickup: 0, destination: 0 });
 
   const areaQuery = useQuery<ServiceAreaInfo>(
     (signal) => api.get<ServiceAreaInfo>('/geo/service-area', { auth: false, signal }),
@@ -73,12 +73,14 @@ export default function CustomerHome() {
 
   const savedQuery = useQuery<SavedLocation[]>(
     (signal) => api.get<SavedLocation[]>('/customer/saved-locations', { signal }),
-    [],
+    [user?.id],
+    { enabled: Boolean(user), clearOnLoad: true },
   );
 
   const activeQuery = useQuery<{ booking: Booking | null }>(
     (signal) => api.get<{ booking: Booking | null }>('/customer/bookings/active', { signal }),
-    [],
+    [user?.id],
+    { enabled: Boolean(user), clearOnLoad: true },
   );
   const active = activeQuery.data?.booking ?? null;
 
@@ -117,9 +119,9 @@ export default function CustomerHome() {
         } catch {
           // Coordinates are still usable if reverse geocoding fails.
         }
-        if (alive) setPickup(place);
+        if (alive) setPickup((current) => current ?? place);
       } catch {
-        if (alive) setPickup(fallbackPlace());
+        if (alive) setLocationUnavailable(true);
       } finally {
         if (alive) setLocating(false);
       }
@@ -139,14 +141,14 @@ export default function CustomerHome() {
         { signal },
       ),
     [pickup?.lat, pickup?.lng],
-    { enabled: Boolean(pickup) },
+    { enabled: Boolean(pickup && user), clearOnLoad: true },
   );
   const nearby = nearbyQuery.data?.riders ?? [];
 
-  /* Server-side route and fare estimate. */
-  const estimateQuery = useQuery<RouteEstimate>(
-    (signal) =>
-      api.post<RouteEstimate>(
+  const selectionKey = `${pickup?.lat}:${pickup?.lng}:${destination?.lat}:${destination?.lng}`;
+  const estimateQuery = useQuery<RouteEstimate & { selectionKey: string }>(
+    async (signal) => ({
+      ...(await api.post<RouteEstimate>(
         '/geo/estimate',
         {
           pickup: { label: pickup?.label, address: pickup?.address, lat: pickup?.lat, lng: pickup?.lng },
@@ -158,17 +160,20 @@ export default function CustomerHome() {
           },
         },
         { signal },
-      ),
-    [pickup?.lat, pickup?.lng, destination?.lat, destination?.lng],
-    { enabled: Boolean(pickup && destination) },
+      )),
+      selectionKey,
+    }),
+    [selectionKey],
+    { enabled: Boolean(pickup && destination), clearOnLoad: true },
   );
 
-  const estimate = estimateQuery.data;
+  const estimate = estimateQuery.data?.selectionKey === selectionKey && !estimateQuery.loading && !estimateQuery.error
+    ? estimateQuery.data : null;
   const estimateError = estimateQuery.error;
 
   const reverseInto = useCallback(
     async (target: Target, lat: number, lng: number) => {
-      const token = ++reverseToken.current;
+      const token = ++reverseToken.current[target];
       const draft: Place = {
         label: 'Dropped pin',
         address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
@@ -182,7 +187,7 @@ export default function CustomerHome() {
         const reverse = await api.get<{ place: PlaceResult | null }>(
           `/geo/reverse?lat=${lat}&lng=${lng}`,
         );
-        if (token !== reverseToken.current || !reverse.place) return;
+        if (token !== reverseToken.current[target] || !reverse.place) return;
         const next: Place = {
           label: reverse.place.label,
           address: reverse.place.address,
@@ -198,21 +203,12 @@ export default function CustomerHome() {
     [],
   );
 
-  const handleMapClick = (point: { lat: number; lng: number }) => {
-    if (!pinTarget) return;
-    void reverseInto(pinTarget, point.lat, point.lng);
-    setPinTarget(null);
-  };
-
-  const handleDragEnd = (id: string, point: { lat: number; lng: number }) => {
-    if (id === 'pickup' || id === 'destination') void reverseInto(id, point.lat, point.lng);
-  };
-
   const useMyLocationForPickup = async () => {
     setLocating(true);
     try {
       const coords = await getPosition();
       setSelf(coords);
+      setLocationUnavailable(false);
       await reverseInto('pickup', coords.lat, coords.lng);
     } catch (error) {
       toast.error(errorMessage(error), 'Location unavailable');
@@ -241,7 +237,6 @@ export default function CustomerHome() {
         lat: pickup.lat,
         lng: pickup.lng,
         label: `Pickup: ${pickup.label}`,
-        draggable: true,
       });
     }
     if (destination) {
@@ -251,7 +246,6 @@ export default function CustomerHome() {
         lat: destination.lat,
         lng: destination.lng,
         label: `Drop: ${destination.label}`,
-        draggable: true,
       });
     }
     nearby.forEach((rider) => {
@@ -260,7 +254,7 @@ export default function CustomerHome() {
         kind: 'nearby',
         lat: rider.lat,
         lng: rider.lng,
-        label: `${rider.name} · ${km(rider.distanceMeters)} away`,
+        label: `Available partner · ${km(rider.distanceMeters)} away`,
       });
     });
     return items;
@@ -275,11 +269,16 @@ export default function CustomerHome() {
       toast.warning('Wait for the fare estimate before booking.');
       return;
     }
+    if (!user) {
+      toast.info('Sign in to confirm your booking.');
+      navigate('/login?role=customer&next=%2Fapp');
+      return;
+    }
     setConfirmOpen(true);
   };
 
   const confirmBooking = async () => {
-    if (!pickup || !destination) return;
+    if (!pickup || !destination || !estimate || estimateQuery.loading) return;
     setBooking(true);
     try {
       const result = await api.post<{ booking: Booking }>('/customer/bookings', {
@@ -316,8 +315,6 @@ export default function CustomerHome() {
         routeIsEstimate={estimate?.route.isEstimate}
         boundary={area?.boundary ?? null}
         self={self}
-        onClick={handleMapClick}
-        onMarkerDragEnd={handleDragEnd}
         padding={{ top: 110, bottom: 300, left: 40, right: 40 }}
         fitKey={
           destination
@@ -330,15 +327,18 @@ export default function CustomerHome() {
       <MapTopBar role="customer" trailing={<NotificationsButton />} />
 
       {pinTarget ? (
-        <div className="absolute inset-x-0 top-[74px] z-20 flex justify-center px-4">
-          <button
-            type="button"
-            onClick={() => setPinTarget(null)}
-            className="rounded-full bg-ink px-4 py-2 text-[12px] font-semibold text-cream shadow-lift"
-          >
-            Tap the map to set {pinTarget === 'pickup' ? 'pickup' : 'drop'} · cancel
-          </button>
-        </div>
+        <LocationPicker
+          key={pinTarget}
+          open
+          target={pinTarget}
+          initial={(pinTarget === 'pickup' ? pickup : destination) ?? pickup ?? area?.center ?? DEFAULT_CENTER}
+          boundary={area?.boundary}
+          onClose={() => setPinTarget(null)}
+          onConfirm={(point) => {
+            void reverseInto(pinTarget, point.lat, point.lng);
+            setPinTarget(null);
+          }}
+        />
       ) : null}
 
       {area && !area.isAvailable ? (
@@ -383,8 +383,11 @@ export default function CustomerHome() {
 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h1 className="font-display text-[20px] font-semibold leading-tight text-ink">
-                  {user ? `Ready, ${user.name.split(' ')[0]}?` : 'Where to?'}
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-teal">
+                  {greeting(user?.name)}
+                </p>
+                <h1 className="mt-0.5 font-display text-[20px] font-semibold leading-tight text-ink">
+                  Where do you want to go?
                 </h1>
                 <p className="mt-0.5 text-[12px] text-muted">
                   {nearby.length
@@ -396,6 +399,12 @@ export default function CustomerHome() {
                 <IndianRupee size={10} /> Cash
               </Badge>
             </div>
+
+            {locationUnavailable && !pickup ? (
+              <p role="status" className="mt-3 rounded-2xl bg-mango-100 px-3 py-2 text-[13px] text-ink">
+                Choose your pickup by searching or selecting it on the map.
+              </p>
+            ) : null}
 
             <div className="mt-3 rounded-3xl border border-line/80 bg-white p-3">
               <div className="space-y-2">
@@ -535,7 +544,7 @@ export default function CustomerHome() {
                   size="xl"
                   block
                   onClick={startBooking}
-                  disabled={!area?.isAvailable}
+                  disabled={!area?.isAvailable || estimateQuery.loading || Boolean(estimateError)}
                   icon={<ArrowRight size={19} />}
                 >
                   Book bike · {money(estimate.fare.estimated, estimate.currency)}
@@ -557,9 +566,12 @@ export default function CustomerHome() {
         title={searchTarget === 'pickup' ? 'Set pickup point' : 'Where to?'}
         current={searchTarget === 'pickup' ? pickup : destination}
         saved={savedQuery.data ?? []}
+        allowCurrentLocation={searchTarget === 'pickup'}
         onSelect={(place) => {
+          if (!searchTarget) return;
+          ++reverseToken.current[searchTarget];
           if (searchTarget === 'pickup') setPickup(place);
-          else if (searchTarget === 'destination') setDestination(place);
+          else setDestination(place);
         }}
         onDropPin={searchTarget ? () => setPinTarget(searchTarget) : undefined}
       />
@@ -574,6 +586,7 @@ export default function CustomerHome() {
             size="lg"
             block
             loading={booking}
+            disabled={!estimate || estimateQuery.loading || Boolean(estimateError)}
             onClick={() => void confirmBooking()}
             icon={<ArrowRight size={18} />}
           >

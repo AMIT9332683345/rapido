@@ -1,5 +1,5 @@
 import type { StyleSpecification } from 'maplibre-gl';
-import { MAP_GLYPHS_URL, MAP_PMTILES_URL, MAP_STYLE_URL } from '../config';
+import { APP_NAME, MAP_GLYPHS_URL, MAP_PMTILES_URL, MAP_STYLE_URL } from '../config';
 
 const attribution =
   '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
@@ -156,7 +156,7 @@ export function createPmtilesStyle(url: string): StyleSpecification {
 
   return {
     version: 8,
-    name: 'Amit Gosaba',
+    name: `${APP_NAME} Gosaba`,
     glyphs: MAP_GLYPHS_URL,
     sources: {
       omt: {

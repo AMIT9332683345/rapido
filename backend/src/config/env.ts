@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import brand from '../../../brand.json';
 
 const boolFromString = (def: 'true' | 'false') =>
   z
@@ -15,7 +16,7 @@ const optionalString = z
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
-  APP_NAME: z.string().default('Amit'),
+  APP_NAME: z.string().default(brand.name),
 
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
@@ -25,7 +26,7 @@ const schema = z.object({
   FRONTEND_URLS: optionalString,
   PUBLIC_BASE_URL: optionalString,
 
-  ADMIN_NAME: z.string().default('Amit Admin'),
+  ADMIN_NAME: z.string().default('Admin'),
   ADMIN_MOBILE: z
     .string()
     .regex(/^[6-9]\d{9}$/, 'ADMIN_MOBILE must be a 10 digit Indian mobile')
@@ -40,10 +41,10 @@ const schema = z.object({
   BOOKING_SEARCH_MINUTES: z.coerce.number().positive().default(4),
   RIDE_REQUEST_MAX_ROUNDS: z.coerce.number().int().positive().default(6),
 
-  OSM_USER_AGENT: z.string().default('AmitRide/1.0'),
+  OSM_USER_AGENT: z.string().default('FlashRide/1.0'),
 
   SUPPORT_PHONE: optionalString,
-  SUPPORT_EMAIL: z.string().default('support@amitride.local'),
+  SUPPORT_EMAIL: z.string().default(''),
 
   UPLOAD_DIR: z.string().default('uploads'),
   MAP_PMTILES_URL: optionalString,

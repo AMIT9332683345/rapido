@@ -94,6 +94,7 @@ const bookingSchema = new Schema(
 
     offers: { type: [offerSchema], default: [] },
     declinedRiders: { type: [Schema.Types.ObjectId], default: [] },
+    nearbyRiderCount: { type: Number, default: 0, min: 0 },
     offerRound: { type: Number, default: 0 },
     offerExpiresAt: { type: Date, default: null },
     searchDeadlineAt: { type: Date, default: null },

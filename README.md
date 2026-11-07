@@ -1,4 +1,4 @@
-# Amit — bike taxi for Gosaba
+# Flash — bike taxi for Gosaba
 
 A production-oriented bike-taxi platform for **Chhoto Mollakhali, Gosaba**
 (South 24 Parganas, West Bengal). Three experiences share one API:

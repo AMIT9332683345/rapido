@@ -144,7 +144,7 @@ export default function Landing() {
               to={riderPath}
               className="hidden rounded-full px-3.5 py-2 text-[12.5px] font-semibold text-ink transition hover:bg-ink/[0.06] sm:inline-flex"
             >
-              Drive with Amit
+              Drive with {APP_NAME}
             </Link>
             <Link to="/login?role=admin" className="hidden rounded-full px-3 py-2 text-[12px] font-medium text-muted hover:text-ink sm:inline-flex">
               Admin
@@ -192,7 +192,7 @@ export default function Landing() {
                     className="border-cream/20 bg-transparent text-cream hover:border-cream/40 hover:bg-white/5"
                     icon={<Navigation size={18} />}
                   >
-                    Drive with Amit
+                    Drive with {APP_NAME}
                   </Button>
                 </Link>
               </div>
@@ -373,7 +373,7 @@ export default function Landing() {
             <Link to="/login?role=admin" className="hover:text-ink">
               Admin
             </Link>
-            <span>© {new Date().getFullYear()} Amit</span>
+            <span>© {new Date().getFullYear()} {APP_NAME}</span>
             <a
               href="https://www.openstreetmap.org/copyright"
               target="_blank"

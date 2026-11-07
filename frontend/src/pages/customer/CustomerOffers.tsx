@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { money } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import type { PublicConfig } from '../../types';
-import { SERVICE_LOCATION } from '../../config';
+import { APP_NAME, SERVICE_LOCATION } from '../../config';
 
 export default function CustomerOffers() {
   const query = useQuery<PublicConfig>(
@@ -136,7 +136,7 @@ export default function CustomerOffers() {
             Why we do not list coupons
           </p>
           <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-            Fake discounts hide real prices. Instead, Amit keeps a single fare table for{' '}
+            Fake discounts hide real prices. Instead, {APP_NAME} keeps a single fare table for{' '}
             {SERVICE_LOCATION}, reviewed by the operator. If a local promo is ever introduced, it
             will appear here with its exact rules.
           </p>

@@ -130,7 +130,7 @@
   outline: none;
 }
 
-.amit-pin {
+.flash-pin {
   display: grid;
   place-items: center;
   border-radius: 999px;
@@ -139,19 +139,19 @@
   transition: transform 160ms ease;
 }
 
-.amit-pin:active {
+.flash-pin:active {
   cursor: grabbing;
   transform: scale(0.94);
 }
 
-.amit-pin--pickup {
+.flash-pin--pickup {
   width: 34px;
   height: 34px;
   background: #f7f3e8;
   border: 3px solid #08211f;
 }
 
-.amit-pin--pickup::after {
+.flash-pin--pickup::after {
   content: "";
   width: 10px;
   height: 10px;
@@ -159,18 +159,25 @@
   background: #08211f;
 }
 
-.amit-pin--destination {
+.flash-pin--destination {
   width: 38px;
-  height: 38px;
-  background: #ffb020;
-  border: 3px solid #08211f;
+  height: 52px;
+  border-radius: 0;
   color: #08211f;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 13px;
+  filter: drop-shadow(0 6px 5px rgb(8 33 31 / 0.3));
+  box-shadow: none;
 }
 
-.amit-pin--rider {
+.map-selection-pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 15;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.flash-pin--rider {
   width: 40px;
   height: 40px;
   background: #08211f;
@@ -178,7 +185,7 @@
   color: #ffb020;
 }
 
-.amit-pin--nearby {
+.flash-pin--nearby {
   width: 30px;
   height: 30px;
   background: #f7f3e8;
@@ -187,7 +194,7 @@
   opacity: 0.92;
 }
 
-.amit-pin--customer {
+.flash-pin--customer {
   width: 30px;
   height: 30px;
   background: #1f7f71;
@@ -195,7 +202,7 @@
   color: #f7f3e8;
 }
 
-.amit-pin--note {
+.flash-pin--note {
   width: 30px;
   height: 30px;
   background: #ffb020;
@@ -203,7 +210,7 @@
   color: #08211f;
 }
 
-.amit-dot {
+.flash-dot {
   width: 18px;
   height: 18px;
   border-radius: 999px;
@@ -212,11 +219,11 @@
   box-shadow: 0 0 0 6px rgb(31 127 113 / 0.22);
 }
 
-.amit-pulse {
-  animation: amit-pulse 2.2s ease-out infinite;
+.flash-pulse {
+  animation: flash-pulse 2.2s ease-out infinite;
 }
 
-@keyframes amit-pulse {
+@keyframes flash-pulse {
   0% {
     box-shadow: 0 0 0 0 rgb(255 176 32 / 0.55);
   }

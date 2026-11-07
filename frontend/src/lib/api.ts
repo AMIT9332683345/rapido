@@ -1,4 +1,4 @@
-import { API_BASE } from '../config';
+import { API_BASE, APP_NAME } from '../config';
 import { clearSession, getToken } from './session';
 
 export class ApiError extends Error {
@@ -59,7 +59,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error;
     throw new ApiError(
-      'Cannot reach Amit right now. Check your internet connection and try again.',
+      `Cannot reach ${APP_NAME} right now. Check your internet connection and try again.`,
       0,
       'NETWORK_ERROR',
     );
@@ -79,7 +79,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
     );
     if (response.status === 401 && auth && getToken()) {
       clearSession();
-      window.dispatchEvent(new CustomEvent('amit:session-expired'));
+      window.dispatchEvent(new CustomEvent('flash:session-expired'));
     }
     throw new ApiError(message, response.status, code, details);
   }

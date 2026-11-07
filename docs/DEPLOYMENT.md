@@ -52,12 +52,12 @@ Environment:
 ```dotenv
 NODE_ENV=production
 PORT=10000                 # Render sets PORT; do not hard-code locally
-APP_NAME=Amit
+APP_NAME=Flash
 MONGODB_URI=<Atlas URI>
 JWT_SECRET=<48-byte random string>
 FRONTEND_URL=https://your-app.vercel.app
 FRONTEND_URLS=https://your-domain.example
-ADMIN_NAME=Amit Admin
+ADMIN_NAME=Flash Admin
 ADMIN_MOBILE=<10-digit mobile>
 ADMIN_PASSWORD=<strong first-run password>
 OSRM_BASE_URL=https://osrm.internal.example
@@ -88,7 +88,7 @@ Notes:
 ```dotenv
 VITE_API_URL=https://amit-api.onrender.com/api
 VITE_SOCKET_URL=https://amit-api.onrender.com
-VITE_APP_NAME=Amit
+VITE_APP_NAME=Flash
 VITE_APP_TAGLINE=Bike rides across Gosaba
 VITE_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/liberty
 # or, when self-hosting tiles:

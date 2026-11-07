@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { cn, IconButton } from './ui';
 import type { Role } from '../types';
+import { APP_NAME } from '../config';
 
 interface NavItem {
   to: string;
@@ -160,7 +161,7 @@ export function MapTopBar({
           </svg>
         </span>
         <span className="font-display text-[15px] font-semibold leading-none">
-          Amit<span className="text-mango">.</span>
+          {APP_NAME}<span className="text-mango">.</span>
         </span>
         <span className="hidden text-[10px] font-semibold uppercase tracking-[0.12em] text-muted min-[390px]:inline">
           {role === 'rider' ? 'Rider' : role === 'admin' ? 'Admin' : 'Gosaba'}

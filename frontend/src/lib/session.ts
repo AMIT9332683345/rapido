@@ -9,6 +9,12 @@ export function loadSession(): Session | null {
     const parsed = JSON.parse(raw) as Session;
     if (!parsed?.token || !parsed?.user?.id) return null;
     if (!['customer', 'rider', 'admin'].includes(parsed.role)) return null;
+    const payload = parsed.token.split('.')[1];
+    const { exp } = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    if (typeof exp !== 'number' || exp * 1000 <= Date.now()) {
+      clearSession();
+      return null;
+    }
     return parsed;
   } catch {
     return null;

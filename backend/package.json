@@ -1,9 +1,9 @@
 {
-  "name": "amit-ride-backend",
+  "name": "flash-ride-backend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Amit ride-hailing API - customers, riders, admin, live tracking",
+  "description": "Flash ride-hailing API - customers, riders, admin, live tracking",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/seed/runSeed.ts",
     "db:fix-indexes": "node scripts/fix-legacy-indexes.mjs",
-    "test": "node tests/integration.mjs"
+    "test": "node tests/integration.mjs",
+    "test:offline": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

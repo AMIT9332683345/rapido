@@ -22,11 +22,13 @@ import {
   markRiderArrived,
   markRiderArriving,
   rejectBooking,
+  releaseBooking,
   setRiderAvailability,
   startBooking,
 } from '../services/bookingService.js';
 import { populateBooking, serializeBooking } from '../services/serializers.js';
 import { notifyRecipient } from '../services/notificationService.js';
+import { getNavigationRoute } from '../services/routingService.js';
 
 const router = Router();
 router.use(authenticate, requireRole('rider'));
@@ -303,6 +305,36 @@ router.post(
 );
 
 router.post(
+  '/bookings/:id/navigation',
+  requireApprovedRider,
+  asyncHandler(async (req, res) => {
+    const id = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid booking ID').parse(req.params.id);
+    const from = z.object({ lat: latSchema.finite(), lng: lngSchema.finite() }).strict().parse(req.body);
+    const readGoal = async () => {
+      const booking = await BookingModel.findById(id).select('rider status pickup destination').lean();
+      if (!booking) throw HttpError.notFound('Booking not found');
+      if (String(booking.rider ?? '') !== req.auth!.id) {
+        throw HttpError.forbidden('This booking is assigned to another rider');
+      }
+      if (!['ACCEPTED', 'RIDER_ARRIVING', 'RIDER_ARRIVED', 'IN_PROGRESS'].includes(booking.status)) {
+        throw HttpError.conflict('Navigation is available only for an assigned active ride', 'INVALID_RIDE_STATE');
+      }
+      const place = booking.status === 'IN_PROGRESS' ? booking.destination : booking.pickup;
+      const [lng, lat] = place.location.coordinates;
+      if (!isValidLatLng(lat, lng)) throw HttpError.badRequest('The navigation goal has invalid coordinates');
+      return { lat, lng, status: booking.status };
+    };
+    const goal = await readGoal();
+    const route = await getNavigationRoute(from, goal);
+    const current = await readGoal();
+    if (current.status !== goal.status || current.lat !== goal.lat || current.lng !== goal.lng) {
+      throw HttpError.conflict('The ride changed while routing. Request navigation again.', 'NAVIGATION_GOAL_CHANGED');
+    }
+    res.json({ route });
+  }),
+);
+
+router.post(
   '/bookings/:id/arriving',
   requireApprovedRider,
   asyncHandler(async (req, res) => {
@@ -349,6 +381,17 @@ router.post(
       id: req.auth!.id,
       reason: body.reason,
     });
+    res.json({ booking });
+  }),
+);
+
+router.post(
+  '/bookings/:id/release',
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({ reason: z.string().trim().max(300).optional() })
+      .parse(req.body ?? {});
+    const booking = await releaseBooking(req.params.id, req.auth!.id, body.reason);
     res.json({ booking });
   }),
 );

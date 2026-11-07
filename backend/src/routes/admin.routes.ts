@@ -521,7 +521,7 @@ router.get(
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="amit-bookings-${new Date().toISOString().slice(0, 10)}.csv"`,
+      `attachment; filename="flash-bookings-${new Date().toISOString().slice(0, 10)}.csv"`,
     );
     res.send(`\uFEFF${csv}`);
   }),

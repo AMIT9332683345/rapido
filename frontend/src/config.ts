@@ -1,3 +1,5 @@
+import brand from '../../brand.json';
+
 const rawApi = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api').replace(/\/+$/, '');
 const rawSocket = (import.meta.env.VITE_SOCKET_URL || 'http://127.0.0.1:5000').replace(
   /\/+$/,
@@ -12,7 +14,7 @@ function absoluteOrigin(base: string) {
   }
 }
 
-export const APP_NAME = import.meta.env.VITE_APP_NAME || 'Amit';
+export const APP_NAME = import.meta.env.VITE_APP_NAME?.trim() || brand.name;
 export const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || 'Bike taxi for the islands';
 export const API_BASE = rawApi;
 export const API_ORIGIN = absoluteOrigin(rawApi);

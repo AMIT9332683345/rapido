@@ -54,8 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       toast.warning('Your session expired. Please sign in again.', 'Signed out');
     };
-    window.addEventListener('amit:session-expired', onExpired);
-    return () => window.removeEventListener('amit:session-expired', onExpired);
+    window.addEventListener('flash:session-expired', onExpired);
+    return () => window.removeEventListener('flash:session-expired', onExpired);
   }, [toast]);
 
   const persist = useCallback((next: Session) => {

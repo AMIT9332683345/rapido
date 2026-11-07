@@ -7,6 +7,7 @@ import { api } from '../../lib/api';
 import { km, money, shortDate } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import type { EarningsSummary } from '../../types';
+import { APP_NAME } from '../../config';
 
 type Range = 'today' | 'week' | 'month';
 
@@ -147,7 +148,7 @@ export default function RiderEarnings() {
               <div className="min-w-0">
                 <p className="text-[12.5px] font-semibold text-ink">How payouts work</p>
                 <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
-                  Amit charges no commission in cash mode. The fare shown on a completed ride is what
+                  {APP_NAME} charges no commission in cash mode. The fare shown on a completed ride is what
                   you collect from the customer. Platform fees, when enabled, are shown in the fare
                   breakdown before the trip.
                 </p>

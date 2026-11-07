@@ -4,9 +4,9 @@ import { errorMessage } from './api';
 export function useQuery<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   deps: unknown[],
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; clearOnLoad?: boolean } = {},
 ) {
-  const { enabled = true } = options;
+  const { enabled = true, clearOnLoad = false } = options;
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
@@ -15,10 +15,15 @@ export function useQuery<T>(
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
+      if (clearOnLoad) {
+        setData(null);
+        setError(null);
+      }
       return;
     }
     const controller = new AbortController();
     let alive = true;
+    if (clearOnLoad) setData(null);
     setLoading(true);
     setError(null);
 

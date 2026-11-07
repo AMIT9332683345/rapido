@@ -9,6 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { errorMessage } from '../../lib/api';
 import { homeForRole } from '../../lib/session';
 import type { Role } from '../../types';
+import { APP_NAME } from '../../config';
 
 function coerceRole(value: string | null): Role {
   return value === 'rider' || value === 'admin' ? value : 'customer';
@@ -128,7 +129,7 @@ export default function Login() {
         </div>
       ) : (
         <p className="mt-6 text-center text-[13px] text-muted">
-          New to Amit?{' '}
+          New to {APP_NAME}?{' '}
           <Link
             to={`/register?role=${role}`}
             className="font-semibold text-ink underline decoration-mango decoration-2 underline-offset-4"

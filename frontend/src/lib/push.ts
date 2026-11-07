@@ -1,4 +1,4 @@
-import { FIREBASE_CONFIG, FIREBASE_ENABLED } from '../config';
+import { APP_NAME, FIREBASE_CONFIG, FIREBASE_ENABLED } from '../config';
 import { api } from './api';
 
 const FCM_VERSION = '10.14.1';
@@ -85,7 +85,7 @@ async function registerFcm(registration: ServiceWorkerRegistration): Promise<voi
   }
 
   msgMod.onMessage(messaging, (payload: any) => {
-    const title = payload?.notification?.title || 'Amit';
+    const title = payload?.notification?.title || APP_NAME;
     const body = payload?.notification?.body || 'You have a new update.';
     if (document.visibilityState !== 'visible') {
       void showLocalNotification(title, body, payload?.data?.link || '/');

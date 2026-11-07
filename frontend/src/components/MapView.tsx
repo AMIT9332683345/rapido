@@ -9,7 +9,7 @@ import maplibregl, {
 import { Protocol } from 'pmtiles';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import type { GeoBoundary, LatLng, LineString } from '../types';
-import { DEFAULT_CENTER } from '../config';
+import { APP_NAME, DEFAULT_CENTER } from '../config';
 import { mapStyle, usesPmtiles } from '../lib/mapStyle';
 import { cn } from './ui';
 
@@ -40,7 +40,7 @@ export interface MapMarker {
 const PIN_SVG: Record<MarkerKind, string> = {
   pickup: '',
   destination:
-    '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z"/><circle cx="12" cy="9" r="2.6"/></svg>',
+    '<svg width="38" height="52" viewBox="0 0 38 52" fill="#ffb020" stroke="#08211f" stroke-width="2.5"><path d="M19 50S2 30 2 19a17 17 0 1 1 34 0c0 11-17 31-17 31Z"/><circle cx="19" cy="18" r="6" fill="#f7f3e8"/></svg>',
   rider:
     '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M5.5 17.5 9 10h6l3.5 7.5"/><path d="M9 10 7 17.5"/><path d="M15 10l1-3.5"/><path d="M13.5 6.5H18"/></svg>',
   nearby:
@@ -52,7 +52,7 @@ const PIN_SVG: Record<MarkerKind, string> = {
 
 function markerElement(kind: MarkerKind): HTMLElement {
   const el = document.createElement('div');
-  el.className = `amit-pin amit-pin--${kind}`;
+  el.className = `flash-pin flash-pin--${kind}`;
   el.setAttribute('role', 'img');
   if (PIN_SVG[kind]) el.innerHTML = PIN_SVG[kind];
   return el;
@@ -140,7 +140,7 @@ export default function MapView({
     }
 
     map.addControl(
-      new maplibregl.AttributionControl({ compact: true, customAttribution: 'Amit · OSM' }),
+      new maplibregl.AttributionControl({ compact: true, customAttribution: `${APP_NAME} · OSM` }),
       'bottom-right',
     );
     mapRef.current = map;
@@ -326,7 +326,7 @@ export default function MapView({
         const marker = new maplibregl.Marker({
           element: el,
           draggable: Boolean(item.draggable),
-          anchor: 'center',
+          anchor: item.kind === 'destination' ? 'bottom' : 'center',
         })
           .setLngLat([item.lng, item.lat])
           .addTo(map);
@@ -359,7 +359,7 @@ export default function MapView({
     }
     if (!selfMarkerRef.current) {
       const el = document.createElement('div');
-      el.className = 'amit-dot';
+      el.className = 'flash-dot';
       selfMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
         .setLngLat([self.lng, self.lat])
         .addTo(map);
@@ -409,6 +409,11 @@ export default function MapView({
     didInitialFit.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, ready]);
+
+  useEffect(() => {
+    if (!ready || fit !== 'none') return;
+    mapRef.current?.easeTo({ center: [center.lng, center.lat], duration: 450 });
+  }, [center.lat, center.lng, ready, fit]);
 
   const recenter = () => {
     const map = mapRef.current;

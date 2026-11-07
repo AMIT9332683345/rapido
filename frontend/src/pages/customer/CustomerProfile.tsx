@@ -40,6 +40,7 @@ import { api, errorMessage, uploadFile } from '../../lib/api';
 import { canInstall, isStandalone, promptInstall, subscribeInstall } from '../../lib/install';
 import { enablePush, pushPermission } from '../../lib/push';
 import { useQuery } from '../../lib/useQuery';
+import { APP_NAME } from '../../config';
 import type { Place, PublicConfig, SavedLocation, UserProfile } from '../../types';
 
 export default function CustomerProfile() {
@@ -153,7 +154,7 @@ export default function CustomerProfile() {
 
   const install = async () => {
     const accepted = await promptInstall();
-    if (accepted) toast.success('Amit is installing on your device.');
+    if (accepted) toast.success(`${APP_NAME} is installing on your device.`);
   };
 
   const supportPhone = configQuery.data?.app.supportPhone ?? null;
@@ -179,7 +180,7 @@ export default function CustomerProfile() {
                   className="h-16 w-16 rounded-full object-cover"
                 />
               ) : (
-                <Avatar name={user?.name ?? 'Amit'} size={64} />
+                <Avatar name={user?.name ?? 'Flash'} size={64} />
               )}
               <button
                 type="button"
@@ -308,7 +309,7 @@ export default function CustomerProfile() {
             >
               <Download size={17} className="text-teal" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold text-ink">Install Amit</span>
+                <span className="block text-[13px] font-semibold text-ink">Install {APP_NAME}</span>
                 <span className="block text-[11px] text-muted">Add the app to your home screen</span>
               </span>
               <ChevronRight size={16} className="text-muted" />
@@ -377,7 +378,8 @@ export default function CustomerProfile() {
         </button>
 
         <p className="pb-2 text-center text-[10.5px] leading-relaxed text-muted">
-          Amit ride booking · {new Date().getFullYear()} · Map data © OpenStreetMap contributors
+          <Link to="/about" className="hover:text-ink">About Flash</Link> ·{' '}
+          {new Date().getFullYear()} · Map data © OpenStreetMap contributors
         </p>
       </div>
 
@@ -461,7 +463,7 @@ export default function CustomerProfile() {
       <ConfirmDialog
         open={logoutOpen}
         onClose={() => setLogoutOpen(false)}
-        title="Sign out of Amit?"
+        title={`Sign out of ${APP_NAME}?`}
         body="Your saved places and ride history stay on this account. You can sign back in with your mobile and password."
         confirmLabel="Sign out"
         tone="danger"

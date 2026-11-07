@@ -11,6 +11,7 @@ export default function PlaceSearch({
   title,
   current,
   saved = [],
+  allowCurrentLocation = true,
   onSelect,
   onDropPin,
 }: {
@@ -19,6 +20,7 @@ export default function PlaceSearch({
   title: string;
   current?: Place | null;
   saved?: SavedLocation[];
+  allowCurrentLocation?: boolean;
   onSelect: (place: Place) => void;
   onDropPin?: () => void;
 }) {
@@ -146,15 +148,17 @@ export default function PlaceSearch({
         ) : null}
 
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => void useCurrent()}
-            disabled={locating}
-            className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white text-[12.5px] font-semibold text-ink transition hover:border-teal/40 disabled:opacity-50"
-          >
-            {locating ? <Spinner size={16} /> : <Crosshair size={16} className="text-teal" />}
-            Use my location
-          </button>
+          {allowCurrentLocation ? (
+            <button
+              type="button"
+              onClick={() => void useCurrent()}
+              disabled={locating}
+              className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-line bg-white text-[12.5px] font-semibold text-ink transition hover:border-teal/40 disabled:opacity-50"
+            >
+              {locating ? <Spinner size={16} /> : <Crosshair size={16} className="text-teal" />}
+              Use my location
+            </button>
+          ) : null}
           {onDropPin ? (
             <button
               type="button"

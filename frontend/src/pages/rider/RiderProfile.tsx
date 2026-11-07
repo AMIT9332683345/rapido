@@ -45,6 +45,7 @@ import { getPosition } from '../../lib/geolocation';
 import { canInstall, isStandalone, promptInstall, subscribeInstall } from '../../lib/install';
 import { enablePush, pushPermission } from '../../lib/push';
 import { useQuery } from '../../lib/useQuery';
+import { APP_NAME } from '../../config';
 import type {
   DocumentKind,
   PublicConfig,
@@ -272,7 +273,7 @@ export default function RiderProfile() {
 
   const install = async () => {
     const accepted = await promptInstall();
-    if (accepted) toast.success('Amit is installing on your device.');
+    if (accepted) toast.success(`${APP_NAME} is installing on your device.`);
   };
 
   if (query.loading && !profile) {
@@ -560,7 +561,7 @@ export default function RiderProfile() {
             >
               <Download size={17} className="text-teal" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold text-ink">Install Amit</span>
+                <span className="block text-[13px] font-semibold text-ink">Install {APP_NAME}</span>
                 <span className="block text-[11px] text-muted">Add the rider app to your home screen</span>
               </span>
               <ChevronRight size={16} className="text-muted" />
@@ -760,7 +761,7 @@ export default function RiderProfile() {
       <ConfirmDialog
         open={logoutOpen}
         onClose={() => setLogoutOpen(false)}
-        title="Sign out of Amit?"
+        title={`Sign out of ${APP_NAME}?`}
         body="If you are online you will stop receiving requests. Sign back in with your mobile and password."
         confirmLabel="Sign out"
         tone="danger"

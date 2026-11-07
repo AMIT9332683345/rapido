@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Bike, ShieldCheck, Waves } from 'lucide-react';
 import { BrandMark, Wordmark } from '../../components/ui';
-import { SERVICE_LOCATION } from '../../config';
+import { APP_NAME, SERVICE_LOCATION } from '../../config';
 
 function MapArt() {
   return (
@@ -57,7 +57,7 @@ export function AuthLayout({
           <Link to="/" className="inline-flex items-center gap-2">
             <BrandMark size={40} />
             <span className="font-display text-[26px] font-semibold">
-              Amit<span className="text-mango">.</span>
+              {APP_NAME}<span className="text-mango">.</span>
             </span>
           </Link>
         </div>
@@ -128,7 +128,7 @@ export function AuthLayout({
         </div>
 
         <p className="px-5 pb-6 text-center text-[10.5px] leading-relaxed text-muted/80">
-          By continuing you agree to use Amit responsibly. Map data © OpenStreetMap contributors.
+          By continuing you agree to use {APP_NAME} responsibly. Map data © OpenStreetMap contributors.
         </p>
       </main>
     </div>

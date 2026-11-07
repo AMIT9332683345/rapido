@@ -1,14 +1,18 @@
+import { createHash, randomBytes } from 'node:crypto';
+import jwt from 'jsonwebtoken';
+import { Types } from 'mongoose';
 import { env } from '../config/env.js';
-import { BookingModel } from '../models/Booking.js';
+import { BookingModel, type BookingDocument } from '../models/Booking.js';
+import type { FareConfiguration } from '../models/FareConfiguration.js';
 import { RiderModel } from '../models/Rider.js';
 import { PaymentModel } from '../models/Payment.js';
 import { RideLocationModel } from '../models/RideLocation.js';
 import { ACTIVE_RIDE_STATUSES, type RideStatus } from '../models/enums.js';
 import { HttpError } from '../utils/httpError.js';
 import { roundMoney, toGeoPoint, isValidLatLng } from '../utils/geo.js';
-import { calculateFare, getFareConfig } from './fareService.js';
-import { assertBookablePoint } from './settingsService.js';
-import { getRoadRoute } from './routingService.js';
+import { calculateFare, getFareConfig, type FareBreakdown } from './fareService.js';
+import { assertBookablePoint, assertRouteInServiceArea } from './settingsService.js';
+import { getRoadRoute, type RouteResult } from './routingService.js';
 import { findNearbyRiders } from './geoService.js';
 import { logRideActivity } from './activityService.js';
 import { notifyAdmins, notifyRecipient } from './notificationService.js';
@@ -37,7 +41,7 @@ function makeBookingCode(): string {
   const now = new Date();
   const stamp = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
   const random = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `AMT-${stamp}-${random}`;
+  return `FL-${stamp}-${random}`;
 }
 
 function placeDoc(place: PlaceInput) {
@@ -101,11 +105,215 @@ export async function currentOfferForRider(riderId: string) {
   return booking ? serializeBooking(booking, 'rider') : null;
 }
 
+const DESTINATION_EDIT_STATUSES: RideStatus[] = [
+  'SEARCHING', 'REQUESTED', 'ACCEPTED', 'RIDER_ARRIVING', 'RIDER_ARRIVED',
+];
+const DESTINATION_QUOTE_AUDIENCE = 'booking-destination-quote';
+const DESTINATION_QUOTE_TTL_MS = 120_000;
+const MAX_DESTINATION_QUOTES = 200;
+const MAX_DESTINATION_QUOTE_BYTES = 16 * 1024 * 1024;
+
+interface DestinationQuote {
+  actorId: string;
+  bookingId: string;
+  revision: string;
+  status: RideStatus;
+  destination: ReturnType<typeof placeDoc>;
+  route: RouteResult;
+  fare: FareBreakdown;
+  configFingerprint: string;
+  expiresAt: number;
+}
+
+// Route geometry stays server-side; the signed token is only a short cache reference.
+const destinationQuotes = new Map<string, { quote: DestinationQuote; bytes: number }>();
+let destinationQuoteBytes = 0;
+
+function removeDestinationQuote(id: string) {
+  const entry = destinationQuotes.get(id);
+  if (entry) destinationQuoteBytes -= entry.bytes;
+  destinationQuotes.delete(id);
+}
+
+function fareConfigFingerprint(config: FareConfiguration): string {
+  return createHash('sha256').update(JSON.stringify({
+    id: String((config as { _id?: unknown })._id ?? ''),
+    updatedAt: config.updatedAt,
+    currency: config.currency,
+    baseFare: config.baseFare,
+    perKm: config.perKm,
+    perMinute: config.perMinute,
+    minimumFare: config.minimumFare,
+    waitingFreeMinutes: config.waitingFreeMinutes,
+    waitingPerMinute: config.waitingPerMinute,
+    cancellationFee: config.cancellationFee,
+    platformFee: config.platformFee,
+    isActive: config.isActive,
+  })).digest('hex');
+}
+
+function assertDestinationEditable(booking: BookingDocument, customerId: string) {
+  if (String(booking.customer) !== customerId) {
+    throw HttpError.forbidden('This booking belongs to another customer');
+  }
+  if (booking.status === 'IN_PROGRESS') {
+    throw HttpError.conflict(
+      'Destination changes during a ride require support. Contact support for help.',
+      'RIDE_IN_PROGRESS',
+    );
+  }
+  if (!DESTINATION_EDIT_STATUSES.includes(booking.status)) {
+    throw HttpError.conflict('The destination can only be changed before the ride starts', 'INVALID_RIDE_STATE');
+  }
+}
+
+export async function estimateBookingDestination(
+  bookingId: string,
+  customerId: string,
+  destination: PlaceInput,
+) {
+  const booking = await BookingModel.findById(bookingId);
+  if (!booking) throw HttpError.notFound('Booking not found');
+  assertDestinationEditable(booking, customerId);
+  const destinationDoc = placeDoc(destination);
+  const [pickupLng, pickupLat] = booking.pickup.location.coordinates;
+  if (pickupLat === destination.lat && pickupLng === destination.lng) {
+    throw HttpError.badRequest('Pickup and destination cannot be the same');
+  }
+  const [area] = await Promise.all([
+    assertBookablePoint(pickupLat, pickupLng),
+    assertBookablePoint(destination.lat, destination.lng),
+  ]);
+  const route = await getRoadRoute({ lat: pickupLat, lng: pickupLng }, destination);
+  assertRouteInServiceArea(area, route);
+  const config = await getFareConfig();
+  const fare = calculateFare(config, route.distanceMeters, route.durationSeconds);
+  const quote: DestinationQuote = {
+    actorId: customerId,
+    bookingId: String(booking._id),
+    revision: booking.updatedAt.toISOString(),
+    status: booking.status,
+    destination: destinationDoc,
+    route,
+    fare,
+    configFingerprint: fareConfigFingerprint(config),
+    expiresAt: Date.now() + DESTINATION_QUOTE_TTL_MS,
+  };
+  const json = JSON.stringify(quote);
+  const bytes = Buffer.byteLength(json);
+  if (bytes > MAX_DESTINATION_QUOTE_BYTES) {
+    throw HttpError.unavailable('This route is too large to quote safely. Please contact support.');
+  }
+  for (const [id, entry] of destinationQuotes) {
+    if (entry.quote.expiresAt <= Date.now()) removeDestinationQuote(id);
+  }
+  while (destinationQuotes.size >= MAX_DESTINATION_QUOTES || destinationQuoteBytes + bytes > MAX_DESTINATION_QUOTE_BYTES) {
+    removeDestinationQuote(destinationQuotes.keys().next().value!);
+  }
+  const id = randomBytes(32).toString('hex');
+  const token = jwt.sign({
+    type: DESTINATION_QUOTE_AUDIENCE,
+    actorId: customerId,
+    bookingId: quote.bookingId,
+    revision: quote.revision,
+  }, env.JWT_SECRET, {
+    algorithm: 'HS256', audience: DESTINATION_QUOTE_AUDIENCE, jwtid: id, expiresIn: '2m',
+  });
+  destinationQuotes.set(id, { quote: JSON.parse(json) as DestinationQuote, bytes });
+  destinationQuoteBytes += bytes;
+  return { token, route, fare, currency: fare.currency };
+}
+
+export async function confirmBookingDestination(bookingId: string, customerId: string, quoteToken: string) {
+  let claims: jwt.JwtPayload;
+  try {
+    const decoded = jwt.verify(quoteToken, env.JWT_SECRET, {
+      algorithms: ['HS256'], audience: DESTINATION_QUOTE_AUDIENCE,
+    });
+    if (typeof decoded === 'string' || decoded.type !== DESTINATION_QUOTE_AUDIENCE || !decoded.jti) {
+      throw new Error('Invalid quote type');
+    }
+    claims = decoded;
+  } catch {
+    throw HttpError.conflict('Destination quote is invalid or expired. Request a new estimate.', 'QUOTE_EXPIRED');
+  }
+  const quoteId = claims.jti!;
+  const quote = destinationQuotes.get(quoteId)?.quote;
+  if (!quote || quote.expiresAt <= Date.now()) {
+    removeDestinationQuote(quoteId);
+    throw HttpError.conflict('Destination quote expired. Request a new estimate.', 'QUOTE_EXPIRED');
+  }
+  if (quote.actorId !== customerId || claims.actorId !== customerId ||
+      quote.bookingId !== bookingId || claims.bookingId !== bookingId || claims.revision !== quote.revision) {
+    throw HttpError.forbidden('This quote belongs to another customer or booking');
+  }
+  const booking = await BookingModel.findById(bookingId);
+  if (!booking) throw HttpError.notFound('Booking not found');
+  assertDestinationEditable(booking, customerId);
+  if (booking.updatedAt.toISOString() !== quote.revision || booking.status !== quote.status) {
+    throw HttpError.conflict('This ride changed. Request a new destination estimate.', 'QUOTE_STALE');
+  }
+  const [pickupLng, pickupLat] = booking.pickup.location.coordinates;
+  const [destinationLng, destinationLat] = quote.destination.location.coordinates;
+  const [area] = await Promise.all([
+    assertBookablePoint(pickupLat, pickupLng),
+    assertBookablePoint(destinationLat, destinationLng),
+  ]);
+  assertRouteInServiceArea(area, quote.route);
+  const config = await getFareConfig();
+  if (fareConfigFingerprint(config) !== quote.configFingerprint) {
+    throw HttpError.conflict('Fare settings changed. Request a new destination estimate.', 'QUOTE_STALE');
+  }
+  if (quote.expiresAt <= Date.now()) {
+    removeDestinationQuote(quoteId);
+    throw HttpError.conflict('Destination quote expired. Request a new estimate.', 'QUOTE_EXPIRED');
+  }
+  const updated = await BookingModel.findOneAndUpdate({
+    _id: bookingId,
+    customer: customerId,
+    status: quote.status,
+    updatedAt: new Date(quote.revision),
+  }, {
+    $set: { destination: quote.destination, route: quote.route, fare: quote.fare },
+  }, { new: true, runValidators: true });
+  if (!updated) throw HttpError.conflict('This ride changed. Request a new destination estimate.', 'QUOTE_STALE');
+  removeDestinationQuote(quoteId);
+  await logRideActivity({
+    bookingId,
+    status: updated.status,
+    actorRole: 'customer',
+    actorId: customerId,
+    note: 'Customer changed the destination before the ride started',
+    meta: {
+      from: {
+        label: booking.destination.label,
+        address: booking.destination.address ?? null,
+        location: { type: 'Point', coordinates: booking.destination.location.coordinates },
+      },
+      to: quote.destination,
+      oldFare: booking.fare.estimated,
+      newFare: quote.fare.estimated,
+    },
+  });
+  await pushBookingState(bookingId);
+  if (updated.rider) {
+    await notifyRecipient({
+      recipientRole: 'rider',
+      recipientId: String(updated.rider),
+      title: 'Destination updated',
+      body: `The customer changed the destination to ${updated.destination.label}. Estimated fare: ${quote.fare.currency} ${quote.fare.estimated}.`,
+      type: 'destination_updated',
+      data: { bookingId },
+    });
+  }
+  return getBookingForActor(bookingId, 'customer', customerId);
+}
+
 export async function createBooking(input: CreateBookingInput) {
   const pickup = placeDoc(input.pickup);
   const destination = placeDoc(input.destination);
 
-  await Promise.all([
+  const [area] = await Promise.all([
     assertBookablePoint(input.pickup.lat, input.pickup.lng),
     assertBookablePoint(input.destination.lat, input.destination.lng),
   ]);
@@ -125,6 +333,7 @@ export async function createBooking(input: CreateBookingInput) {
     { lat: input.pickup.lat, lng: input.pickup.lng },
     { lat: input.destination.lat, lng: input.destination.lng },
   );
+  assertRouteInServiceArea(area, route);
 
   const config = await getFareConfig();
   const fare = calculateFare(config, route.distanceMeters, route.durationSeconds);
@@ -189,19 +398,36 @@ async function closeOffersForRiders(
   }
 }
 
+// Evaluate against the stored array, never a read-time copy: concurrent responses survive.
+function expirePendingOffers(now: Date) {
+  return {
+    $map: {
+      input: { $ifNull: ['$offers', []] },
+      as: 'offer',
+      in: {
+        $cond: [
+          { $eq: ['$$offer.response', 'pending'] },
+          { $mergeObjects: ['$$offer', { response: 'expired', respondedAt: now }] },
+          '$$offer',
+        ],
+      },
+    },
+  };
+}
+
 export async function offerToRiders(bookingId: string, round: number) {
-  const booking = await populateBooking(
-    BookingModel.findOne({ _id: bookingId, status: 'SEARCHING' }),
-  );
-  if (!booking) return;
+  const booking = await BookingModel.findOne({ _id: bookingId, status: 'SEARCHING', rider: null });
+  if (!booking || round !== (booking.offerRound ?? 0) + 1) return;
 
   const now = new Date();
+  const pending = (booking.offers ?? []).some((offer) => offer.response === 'pending');
+  if (pending && booking.offerExpiresAt && booking.offerExpiresAt > now) return;
   if (
     !booking.searchDeadlineAt ||
     booking.searchDeadlineAt <= now ||
     round > env.RIDE_REQUEST_MAX_ROUNDS
   ) {
-    await expireBooking(bookingId);
+    await expireBooking(bookingId, booking.offerRound ?? 0);
     return;
   }
 
@@ -212,55 +438,54 @@ export async function offerToRiders(bookingId: string, round: number) {
   );
   const declined = new Set((booking.declinedRiders ?? []).map(String));
   const candidates = nearby.filter((rider) => !declined.has(rider.id));
-
-  if (!candidates.length) {
-    const retryAt = new Date(
-      Math.min(now.getTime() + 15_000, booking.searchDeadlineAt.getTime()),
-    );
-    await BookingModel.updateOne(
-      { _id: bookingId, status: 'SEARCHING' },
-      { $set: { offerExpiresAt: retryAt, offerRound: round } },
-    );
-    if (retryAt <= now) await expireBooking(bookingId);
+  const dispatchedAt = new Date();
+  if (booking.searchDeadlineAt <= dispatchedAt) {
+    await expireBooking(bookingId, booking.offerRound ?? 0);
     return;
   }
+  const offerExpiresAt = new Date(Math.min(
+    dispatchedAt.getTime() + (candidates.length ? env.BOOKING_OFFER_SECONDS * 1000 : 15_000),
+    booking.searchDeadlineAt.getTime(),
+  ));
+  const offers = candidates.map((rider) => ({
+    rider: new Types.ObjectId(rider.id),
+    offeredAt: dispatchedAt,
+    respondedAt: null,
+    response: 'pending',
+    round,
+  }));
 
-  const history = (booking.offers ?? []).filter(
-    (offer: any) => offer.response !== 'pending',
-  );
-  const offers = [
-    ...history.map((offer: any) => ({
-      rider: offer.rider || offer.rider?._id,
-      offeredAt: offer.offeredAt,
-      respondedAt: offer.respondedAt,
-      response: offer.response,
-      round: offer.round,
-    })),
-    ...candidates.map((rider) => ({
-      rider: rider.id,
-      offeredAt: now,
-      respondedAt: null,
-      response: 'pending',
-      round,
-    })),
-  ];
-
-  const offerExpiresAt = new Date(now.getTime() + env.BOOKING_OFFER_SECONDS * 1000);
   const updated = await BookingModel.findOneAndUpdate(
-    { _id: bookingId, status: 'SEARCHING' },
     {
+      _id: bookingId,
+      status: 'SEARCHING',
+      rider: null,
+      offerRound: booking.offerRound ?? 0,
+      updatedAt: booking.updatedAt,
+      $or: [
+        { offerExpiresAt: null },
+        { offerExpiresAt: { $lte: dispatchedAt } },
+        { offers: { $not: { $elemMatch: { response: 'pending' } } } },
+      ],
+    },
+    [{
       $set: {
-        offers,
+        offers: { $concatArrays: [expirePendingOffers(dispatchedAt), { $literal: offers }] },
+        nearbyRiderCount: new Set(nearby.map((rider) => rider.id)).size,
         offerRound: round,
         offerExpiresAt,
       },
-    },
+    }],
     { new: true },
   );
   if (!updated) return;
 
+  await closeOffersForRiders(booking.offers ?? []);
+  await pushBookingState(bookingId);
+  if (!candidates.length) return;
+
   const populated = await getBookingDocument(bookingId);
-  if (!populated) return;
+  if (!populated || populated.status !== 'SEARCHING' || populated.offerRound !== round) return;
   const riderView = await serializeBooking(populated, 'rider');
 
   const io = getIo();
@@ -273,38 +498,45 @@ export async function offerToRiders(bookingId: string, round: number) {
       recipientRole: 'rider',
       recipientId: rider.id,
       title: 'New ride request',
-      body: `${booking.pickup.label} → ${booking.destination.label} · ₹${booking.fare?.estimated ?? 0}`,
+      body: `${updated.pickup.label} → ${updated.destination.label} · ₹${updated.fare?.estimated ?? 0}`,
       type: 'ride_request',
       data: { bookingId },
     });
   }
 }
 
-export async function expireBooking(bookingId: string) {
+export async function expireBooking(bookingId: string, expectedRound?: number) {
   const now = new Date();
   const booking = await BookingModel.findOneAndUpdate(
-    { _id: bookingId, status: 'SEARCHING' },
     {
+      _id: bookingId,
+      status: 'SEARCHING',
+      rider: null,
+      ...(expectedRound !== undefined ? { offerRound: expectedRound } : {}),
+      $or: [
+        { searchDeadlineAt: null },
+        { searchDeadlineAt: { $lte: now } },
+        {
+          offerRound: { $gte: env.RIDE_REQUEST_MAX_ROUNDS },
+          $or: [
+            { offerExpiresAt: null },
+            { offerExpiresAt: { $lte: now } },
+            { offers: { $not: { $elemMatch: { response: 'pending' } } } },
+          ],
+        },
+      ],
+    },
+    [{
       $set: {
         status: 'EXPIRED',
         offerExpiresAt: null,
+        offers: expirePendingOffers(now),
         'statusTimestamps.expiredAt': now,
       },
-    },
+    }],
     { new: true },
   );
   if (!booking) return;
-
-  await BookingModel.updateOne(
-    { _id: bookingId },
-    {
-      $set: {
-        'offers.$[offer].response': 'expired',
-        'offers.$[offer].respondedAt': now,
-      },
-    },
-    { arrayFilters: [{ 'offer.response': 'pending' }] },
-  );
 
   await logRideActivity({
     bookingId,
@@ -328,26 +560,27 @@ export async function expireBooking(bookingId: string) {
 }
 
 export async function rejectBooking(bookingId: string, riderId: string, reason?: string) {
-  const booking = await BookingModel.findOne({ _id: bookingId, status: 'SEARCHING' });
-  if (!booking) throw HttpError.conflict('This ride request is no longer available');
-
-  const hasOffer = (booking.offers ?? []).some(
-    (offer: any) => String(offer.rider) === riderId && offer.response === 'pending',
-  );
-  if (!hasOffer) throw HttpError.forbidden('This ride was not offered to you');
-
   const now = new Date();
-  const offers = (booking.offers ?? []).map((offer: any) =>
-    String(offer.rider) === riderId && offer.response === 'pending'
-      ? { ...offer.toObject?.(), response: 'rejected', respondedAt: now }
-      : offer,
+  const booking = await BookingModel.findOneAndUpdate(
+    {
+      _id: bookingId,
+      status: 'SEARCHING',
+      rider: null,
+      offerExpiresAt: { $gt: now },
+      searchDeadlineAt: { $gt: now },
+      offers: { $elemMatch: { rider: riderId, response: 'pending' } },
+    },
+    {
+      $set: { 'offers.$.response': 'rejected', 'offers.$.respondedAt': now },
+      $addToSet: { declinedRiders: riderId },
+    },
+    { new: true },
   );
+  if (!booking) {
+    throw HttpError.conflict('This offer has expired, was answered, or was not offered to you', 'OFFER_UNAVAILABLE');
+  }
 
-  await BookingModel.updateOne(
-    { _id: bookingId, status: 'SEARCHING' },
-    { $set: { offers }, $addToSet: { declinedRiders: riderId } },
-  );
-
+  await pushBookingState(bookingId);
   await logRideActivity({
     bookingId,
     status: 'SEARCHING',
@@ -356,9 +589,11 @@ export async function rejectBooking(bookingId: string, riderId: string, reason?:
     note: reason?.trim() ? `Rider declined: ${reason.trim()}` : 'Rider declined the request',
   });
 
-  void offerToRiders(bookingId, (booking.offerRound ?? 1) + 1).catch((error) =>
-    console.error('[booking] redispatch after rejection failed:', error.message),
-  );
+  if (!(booking.offers ?? []).some((offer) => offer.response === 'pending')) {
+    await offerToRiders(bookingId, (booking.offerRound ?? 0) + 1).catch((error) =>
+      console.error('[booking] redispatch after rejection failed:', error.message),
+    );
+  }
 }
 
 export async function acceptBooking(bookingId: string, riderId: string) {
@@ -371,12 +606,22 @@ export async function acceptBooking(bookingId: string, riderId: string) {
     throw HttpError.conflict('Go online before accepting rides', 'RIDER_OFFLINE');
   }
 
-  const before = await BookingModel.findOne({ _id: bookingId, status: 'SEARCHING' }).select(
-    'offers pickup destination customer fare',
-  );
+  const before = await BookingModel.findOne({
+    _id: bookingId,
+    status: 'SEARCHING',
+    rider: null,
+    offerExpiresAt: { $gt: new Date() },
+    searchDeadlineAt: { $gt: new Date() },
+    offers: { $elemMatch: { rider: riderId, response: 'pending' } },
+  }).select('offers pickup destination customer fare offerRound');
   if (!before) {
-    throw HttpError.conflict('Another rider already accepted this ride', 'RIDE_TAKEN');
+    throw HttpError.conflict('This offer has expired, was answered, or was not offered to you', 'OFFER_UNAVAILABLE');
   }
+  const active = await BookingModel.findOne({
+    rider: riderId,
+    status: { $in: ACTIVE_RIDE_STATUSES },
+  }).select('_id');
+  if (active) throw HttpError.conflict('You already have an active ride', 'RIDER_BUSY');
 
   const claimed = await RiderModel.findOneAndUpdate(
     { _id: riderId, status: 'approved', isOnline: true, currentBooking: null },
@@ -387,31 +632,48 @@ export async function acceptBooking(bookingId: string, riderId: string) {
     throw HttpError.conflict('You already have an active ride', 'RIDER_BUSY');
   }
 
-  const now = new Date();
-  const offers = (before.offers ?? []).map((offer: any) => {
-    const offerRider = String(offer.rider?._id ?? offer.rider);
-    if (offerRider === riderId) {
-      return { ...offer.toObject?.(), response: 'accepted', respondedAt: now };
-    }
-    if (offer.response === 'pending') {
-      return { ...offer.toObject?.(), response: 'expired', respondedAt: now };
-    }
-    return offer;
-  });
-
   let booking;
   try {
+    const now = new Date();
+    const riderObjectId = new Types.ObjectId(riderId);
     booking = await BookingModel.findOneAndUpdate(
-      { _id: bookingId, status: 'SEARCHING', rider: null },
       {
+        _id: bookingId,
+        status: 'SEARCHING',
+        rider: null,
+        offerRound: before.offerRound,
+        offerExpiresAt: { $gt: now },
+        searchDeadlineAt: { $gt: now },
+        offers: { $elemMatch: { rider: riderId, response: 'pending', round: before.offerRound } },
+      },
+      [{
         $set: {
           status: 'ACCEPTED',
-          rider: riderId,
-          offers,
+          rider: riderObjectId,
+          offers: {
+            $map: {
+              input: { $ifNull: ['$offers', []] },
+              as: 'offer',
+              in: {
+                $cond: [
+                  { $eq: ['$$offer.response', 'pending'] },
+                  {
+                    $mergeObjects: ['$$offer', {
+                      response: {
+                        $cond: [{ $eq: ['$$offer.rider', riderObjectId] }, 'accepted', 'expired'],
+                      },
+                      respondedAt: now,
+                    }],
+                  },
+                  '$$offer',
+                ],
+              },
+            },
+          },
           offerExpiresAt: null,
           'statusTimestamps.acceptedAt': now,
         },
-      },
+      }],
       { new: true },
     );
   } catch (error) {
@@ -456,7 +718,7 @@ export async function acceptBooking(bookingId: string, riderId: string) {
     data: { bookingId },
   });
 
-  await closeOffersForRiders(offers, riderId);
+  await closeOffersForRiders(booking.offers ?? [], riderId);
   await pushBookingState(bookingId);
   await notifyAdmins('admin:booking', { id: bookingId, status: 'ACCEPTED', riderId });
 
@@ -650,16 +912,9 @@ export async function completeBooking(bookingId: string, riderId: string) {
   }
 
   await RiderModel.updateOne(
-    { _id: riderId },
+    { _id: riderId, currentBooking: bookingId },
     {
-      $set: {
-        currentBooking: null,
-        currentLocation: toGeoPoint(
-          booking.destination.location.coordinates[1],
-          booking.destination.location.coordinates[0],
-        ),
-        lastLocationAt: now,
-      },
+      $set: { currentBooking: null },
       $inc: { totalRides: 1, totalEarnings: finalFare },
     },
   );
@@ -694,7 +949,7 @@ export async function completeBooking(bookingId: string, riderId: string) {
     recipientRole: 'customer',
     recipientId: String(completed.customer),
     title: 'Trip completed',
-    body: `Your fare is ₹${finalFare}. Thanks for riding with Amit.`,
+    body: `Your fare is ₹${finalFare}. Thanks for riding with ${env.APP_NAME}.`,
     type: 'ride_completed',
     data: { bookingId, amount: String(finalFare) },
   });
@@ -719,12 +974,11 @@ export interface CancelActor {
   role: 'customer' | 'rider' | 'admin';
   id: string;
   reason?: string;
+  expectedFee?: number;
+  revision?: string;
 }
 
-export async function cancelBooking(bookingId: string, actor: CancelActor) {
-  const booking = await BookingModel.findById(bookingId);
-  if (!booking) throw HttpError.notFound('Booking not found');
-
+function assertCancellationAllowed(booking: BookingDocument, actor: CancelActor) {
   if (actor.role === 'customer' && String(booking.customer) !== actor.id) {
     throw HttpError.forbidden('This booking belongs to another customer');
   }
@@ -741,15 +995,50 @@ export async function cancelBooking(bookingId: string, actor: CancelActor) {
     );
   }
 
-  const config = await getFareConfig();
+}
+
+function cancellationFee(booking: BookingDocument, actor: CancelActor, config: FareConfiguration) {
   const riderAssigned = Boolean(booking.rider);
   const riderOnWay = ['ACCEPTED', 'RIDER_ARRIVING', 'RIDER_ARRIVED'].includes(booking.status);
-  const fee =
-    actor.role === 'customer' && riderAssigned && riderOnWay ? config.cancellationFee : 0;
+  return actor.role === 'customer' && riderAssigned && riderOnWay ? config.cancellationFee : 0;
+}
+
+export async function estimateBookingCancellation(bookingId: string, customerId: string) {
+  const booking = await BookingModel.findById(bookingId);
+  if (!booking) throw HttpError.notFound('Booking not found');
+  const actor: CancelActor = { role: 'customer', id: customerId };
+  assertCancellationAllowed(booking, actor);
+  const config = await getFareConfig();
+  return {
+    fee: cancellationFee(booking, actor, config),
+    currency: config.currency || 'INR',
+    status: booking.status,
+    revision: booking.updatedAt.toISOString(),
+  };
+}
+
+export async function cancelBooking(bookingId: string, actor: CancelActor) {
+  const booking = await BookingModel.findById(bookingId);
+  if (!booking) throw HttpError.notFound('Booking not found');
+  assertCancellationAllowed(booking, actor);
+  const config = await getFareConfig();
+  const fee = cancellationFee(booking, actor, config);
+  if (actor.role === 'customer' && (actor.expectedFee !== undefined || actor.revision !== undefined)) {
+    if (!Number.isFinite(actor.expectedFee) || actor.expectedFee !== fee ||
+        actor.revision !== booking.updatedAt.toISOString()) {
+      throw HttpError.conflict('The cancellation fee or ride state changed. Review a new estimate.', 'CANCELLATION_CHANGED');
+    }
+  }
   const now = new Date();
 
   const cancelled = await BookingModel.findOneAndUpdate(
-    { _id: bookingId, status: { $in: ACTIVE_RIDE_STATUSES } },
+    {
+      _id: bookingId,
+      status: booking.status,
+      updatedAt: booking.updatedAt,
+      rider: booking.rider ?? null,
+      ...(actor.role === 'customer' ? { customer: actor.id } : {}),
+    },
     {
       $set: {
         status: 'CANCELLED',
@@ -768,7 +1057,7 @@ export async function cancelBooking(bookingId: string, actor: CancelActor) {
     { new: true },
   );
   if (!cancelled) {
-    throw HttpError.conflict('This ride was already accepted or finished elsewhere', 'RIDE_FINISHED');
+    throw HttpError.conflict('The ride state changed. Review a new cancellation estimate.', 'CANCELLATION_CHANGED');
   }
 
   if (booking.rider) {
@@ -829,6 +1118,89 @@ export async function cancelBooking(bookingId: string, actor: CancelActor) {
   await notifyAdmins('admin:booking', { id: bookingId, status: 'CANCELLED' });
 
   return serializeBooking(await getBookingDocument(bookingId), actor.role);
+}
+
+/**
+ * Returns an accepted ride to the dispatch queue instead of cancelling it, so the
+ * customer keeps waiting for a bike rather than losing the booking.
+ */
+export async function releaseBooking(bookingId: string, riderId: string, reason?: string) {
+  const now = new Date();
+  const riderObjectId = new Types.ObjectId(riderId);
+  const booking = await BookingModel.findOneAndUpdate(
+    {
+      _id: bookingId,
+      rider: riderId,
+      status: { $in: ['ACCEPTED', 'RIDER_ARRIVING', 'RIDER_ARRIVED'] },
+    },
+    [{
+      $set: {
+        rider: null,
+        status: 'SEARCHING',
+        offerRound: 0,
+        offerExpiresAt: null,
+        searchDeadlineAt: new Date(now.getTime() + env.BOOKING_SEARCH_MINUTES * 60_000),
+        'statusTimestamps.searchingAt': now,
+        'statusTimestamps.acceptedAt': null,
+        'statusTimestamps.riderArrivingAt': null,
+        'statusTimestamps.arrivedAt': null,
+        declinedRiders: {
+          $setUnion: [{ $ifNull: ['$declinedRiders', []] }, [riderObjectId]],
+        },
+        offers: {
+          $map: {
+            input: { $ifNull: ['$offers', []] },
+            as: 'offer',
+            in: {
+              $cond: [
+                { $in: ['$$offer.response', ['pending', 'accepted']] },
+                { $mergeObjects: ['$$offer', { response: 'expired', respondedAt: now }] },
+                '$$offer',
+              ],
+            },
+          },
+        },
+      },
+    }],
+    { new: true },
+  );
+  if (!booking) {
+    throw HttpError.conflict(
+      'This ride has already started or is no longer assigned to you.',
+      'RIDE_UNAVAILABLE',
+    );
+  }
+
+  await RiderModel.updateOne(
+    { _id: riderId, currentBooking: bookingId },
+    { $set: { currentBooking: null } },
+  );
+
+  await logRideActivity({
+    bookingId,
+    status: 'SEARCHING',
+    actorRole: 'rider',
+    actorId: riderId,
+    note: reason?.trim()
+      ? `Rider released the ride: ${reason.trim()}`
+      : 'Rider released the ride back to the queue',
+  });
+
+  await notifyRecipient({
+    recipientRole: 'customer',
+    recipientId: String(booking.customer),
+    title: 'Finding you another rider',
+    body: 'Your rider could not take this ride, so we are asking nearby riders again. Your booking is still active.',
+    type: 'ride_redispatched',
+    data: { bookingId },
+  });
+
+  await pushBookingState(bookingId);
+  await offerToRiders(bookingId, 1).catch((error) =>
+    console.error('[booking] redispatch after rider release failed:', error.message),
+  );
+
+  return serializeBooking(await getBookingDocument(bookingId), 'rider');
 }
 
 export async function pushBookingState(bookingId: string) {
@@ -994,11 +1366,11 @@ export async function runDispatchSweep() {
 
   for (const booking of due) {
     if (!booking.searchDeadlineAt || booking.searchDeadlineAt <= now) {
-      await expireBooking(String(booking._id));
+      await expireBooking(String(booking._id), booking.offerRound ?? 0);
       continue;
     }
     if ((booking.offerRound ?? 0) >= env.RIDE_REQUEST_MAX_ROUNDS) {
-      await expireBooking(String(booking._id));
+      await expireBooking(String(booking._id), booking.offerRound ?? 0);
       continue;
     }
     try {

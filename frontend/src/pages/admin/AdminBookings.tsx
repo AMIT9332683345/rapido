@@ -21,6 +21,7 @@ import { money, relativeTime, shortDate, shortTime } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import { useToast } from '../../context/ToastContext';
 import type { Booking } from '../../types';
+import { APP_NAME } from '../../config';
 
 interface BookingsResponse {
   rides: Booking[];
@@ -100,7 +101,7 @@ export default function AdminBookings() {
     try {
       await downloadWithAuth(
         `/admin/bookings/export.csv?${filterQuery().toString()}`,
-        `amit-bookings-${new Date().toISOString().slice(0, 10)}.csv`,
+        `${APP_NAME.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-bookings-${new Date().toISOString().slice(0, 10)}.csv`,
       );
       toast.success('Booking report downloaded.');
     } catch (error) {

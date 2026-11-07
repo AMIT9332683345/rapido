@@ -1,17 +1,20 @@
 /* Extra service-worker listeners imported by the generated Workbox worker.
    Handles Web Push payloads from FCM and notification taps. */
 
+// Vite replaces this neutral fallback with the configured app name.
+const NOTIFICATION_TITLE = 'Ride update';
+
 self.addEventListener('push', (event) => {
   let payload = {};
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { notification: { title: 'Amit', body: event.data ? event.data.text() : '' } };
+    payload = { notification: { body: event.data ? event.data.text() : '' } };
   }
 
   const notification = payload.notification || {};
   const data = payload.data || {};
-  const title = notification.title || payload.title || 'Amit';
+  const title = notification.title || payload.title || NOTIFICATION_TITLE;
   const body = notification.body || payload.body || 'You have a new update.';
   const link = data.link || data.url || (data.bookingId ? `/app/ride/${data.bookingId}` : '/');
 

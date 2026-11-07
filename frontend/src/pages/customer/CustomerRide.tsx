@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -17,13 +17,19 @@ import {
 } from 'lucide-react';
 import MapView, { type MapMarker } from '../../components/MapView';
 import NotificationsButton from '../../components/NotificationsButton';
+import PlaceSearch from '../../components/PlaceSearch';
+import LocationPicker from '../../components/LocationPicker';
+import { APP_NAME } from '../../config';
 import { MapTopBar } from '../../components/layout';
 import { FareSummary, RideTimeline, RouteStats, CounterpartCard } from '../../components/ride';
 import {
   Badge,
   Button,
   Card,
-  ConfirmDialog,
+  Sheet,
+  Field,
+  Select,
+  Textarea,
   EmptyState,
   FullPageLoader,
   StatusPill,
@@ -32,8 +38,24 @@ import { useSocket, useSocketEvent } from '../../context/SocketContext';
 import { useToast } from '../../context/ToastContext';
 import { api, errorMessage } from '../../lib/api';
 import { dateTime, km, minutes, money, statusLabel } from '../../lib/format';
-import { useQuery, useCountdown } from '../../lib/useQuery';
-import type { Booking } from '../../types';
+import { useQuery } from '../../lib/useQuery';
+import type { Booking, FareBreakdown, Place, PlaceResult, RouteEstimate } from '../../types';
+
+const cancellationReasons = [
+  'Delivery partner is taking too long.',
+  'Delivery partner is too far away.',
+  'I selected the wrong destination.',
+  'I want to change my pickup location.',
+  'I no longer need the service.',
+  'Other reason.',
+];
+
+interface DestinationQuote {
+  token: string;
+  route: RouteEstimate['route'];
+  fare: FareBreakdown;
+  currency: string;
+}
 
 interface RiderLocation {
   bookingId: string;
@@ -55,6 +77,13 @@ export default function CustomerRide() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [otherReason, setOtherReason] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSearch, setEditSearch] = useState(false);
+  const [editPin, setEditPin] = useState(false);
+  const [newDestination, setNewDestination] = useState<Place | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const reverseRevision = useRef(0);
 
   const query = useQuery<{ booking: Booking }>(
     (signal) => api.get<{ booking: Booking }>(`/customer/bookings/${id}`, { signal }),
@@ -85,8 +114,55 @@ export default function CustomerRide() {
     return () => window.clearInterval(timer);
   }, [booking?.status, query.reload]);
 
-  const countdown = useCountdown(booking?.searchDeadlineAt ?? null);
-  const offerCountdown = useCountdown(booking?.offerExpiresAt ?? null);
+  const cancelQuote = useQuery<{ fee: number; currency: string; status: string; revision: string }>(
+    (signal) => api.post(`/customer/bookings/${id}/cancel/estimate`, {}, { signal }),
+    [id, booking?.updatedAt],
+    { enabled: cancelOpen, clearOnLoad: true },
+  );
+  const destinationKey = `${id}:${booking?.updatedAt}:${newDestination?.lat}:${newDestination?.lng}`;
+  const destinationQuote = useQuery<{ quote: DestinationQuote; key: string }>(
+    async (signal) => ({
+      ...(await api.post<{ quote: DestinationQuote }>(`/customer/bookings/${id}/destination/estimate`, {
+        destination: newDestination,
+      }, { signal })),
+      key: destinationKey,
+    }),
+    [destinationKey],
+    { enabled: editOpen && Boolean(newDestination), clearOnLoad: true },
+  );
+  const quote = destinationQuote.data?.key === destinationKey && !destinationQuote.loading && !destinationQuote.error
+    ? destinationQuote.data.quote : null;
+
+  const changeDestination = async () => {
+    if (!quote) return;
+    setUpdating(true);
+    try {
+      const result = await api.post<{ booking: Booking }>(`/customer/bookings/${id}/destination`, { quoteToken: quote.token });
+      query.setData(result);
+      setEditOpen(false);
+      setNewDestination(null);
+      toast.success('Destination updated. Your partner has been notified.');
+    } catch (error) {
+      toast.error(errorMessage(error));
+      destinationQuote.reload();
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const selectDestinationPin = async (point: { lat: number; lng: number }) => {
+    const revision = ++reverseRevision.current;
+    setEditPin(false);
+    setNewDestination({ ...point, label: 'Selected destination', address: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` });
+    try {
+      const result = await api.get<{ place: PlaceResult | null }>(`/geo/reverse?lat=${point.lat}&lng=${point.lng}`);
+      if (revision === reverseRevision.current && result.place) {
+        setNewDestination({ ...point, label: result.place.label, address: result.place.address });
+      }
+    } catch {
+      // The confirmed coordinates remain usable without an address.
+    }
+  };
 
   const ridersPosition = booking?.rider?.location ?? null;
   const riderPoint = live ?? ridersPosition;
@@ -116,10 +192,14 @@ export default function CustomerRide() {
   }, [booking, riderPoint?.lat, riderPoint?.lng]);
 
   const cancel = useCallback(async () => {
+    if (!reason || !cancelQuote.data || cancelQuote.loading || cancelQuote.error) return;
+    if (reason === 'Other reason.' && !otherReason.trim()) return;
     setCancelling(true);
     try {
       const result = await api.post<{ booking: Booking }>(`/customer/bookings/${id}/cancel`, {
-        reason: reason.trim() || undefined,
+        reason: reason === 'Other reason.' ? otherReason.trim() : reason,
+        expectedFee: cancelQuote.data.fee,
+        revision: cancelQuote.data.revision,
       });
       query.setData({ booking: result.booking });
       setCancelOpen(false);
@@ -131,10 +211,11 @@ export default function CustomerRide() {
       );
     } catch (error) {
       toast.error(errorMessage(error), 'Could not cancel');
+      cancelQuote.reload();
     } finally {
       setCancelling(false);
     }
-  }, [id, reason, query, toast]);
+  }, [id, reason, otherReason, query, toast, cancelQuote]);
 
   const copyCode = async () => {
     if (!booking) return;
@@ -148,9 +229,9 @@ export default function CustomerRide() {
 
   const share = async () => {
     if (!booking) return;
-    const text = `Amit ride ${booking.code}: ${booking.pickup.label} → ${booking.destination.label}`;
+    const text = `${APP_NAME} ride ${booking.code}: ${booking.pickup.label} → ${booking.destination.label}`;
     try {
-      if (navigator.share) await navigator.share({ title: 'Amit ride', text });
+      if (navigator.share) await navigator.share({ title: `${APP_NAME} ride`, text });
       else {
         await navigator.clipboard.writeText(text);
         toast.info('Ride summary copied.', 'Ready to share');
@@ -246,9 +327,7 @@ export default function CustomerRide() {
               </h1>
               {awaitingRider ? (
                 <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
-                  We are offering this ride to approved riders around {booking.pickup.label}.
-                  {offerCountdown > 0 ? ` Next check in ${offerCountdown}s.` : ''}
-                  {countdown > 0 ? ` Search closes in ${countdown}s.` : ''}
+                  Finding a delivery partner near you…
                 </p>
               ) : atPickup ? (
                 <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
@@ -302,12 +381,12 @@ export default function CustomerRide() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold text-ink">
-                  {offerCountdown > 0 ? `Offer active · ${offerCountdown}s` : 'Contacting riders'}
+                  Searching for an available partner…
                 </p>
                 <p className="text-[11.5px] text-[#7a5200]">
-                  {booking.offerExpiresAt
-                    ? `Expires at ${dateTime(booking.offerExpiresAt)}`
-                    : 'Requests are sent automatically.'}
+                  {booking.matching
+                    ? `${booking.matching.nearby} nearby · ${booking.matching.notified} notified · ${booking.matching.accepted} accepted · ${booking.matching.declined} declined`
+                    : 'We will let you know when someone accepts.'}
                 </p>
               </div>
               <button
@@ -325,7 +404,7 @@ export default function CustomerRide() {
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-2xl bg-white px-3 py-2.5">
                 <p className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-muted">
-                  {inProgress ? 'Trip distance' : 'Rider distance'}
+                  Trip distance
                 </p>
                 <p className="mt-0.5 font-display text-[16px] font-semibold text-ink">
                   {km(booking.route.distanceMeters)}
@@ -358,7 +437,7 @@ export default function CustomerRide() {
                 <p className="text-[11.5px] text-cream/60">
                   {atPickup
                     ? 'Confirm the bike number before you sit.'
-                    : `Arriving in about ${minutes(booking.route.durationSeconds)}.`}
+                    : 'Follow the live rider position on the map.'}
                 </p>
               </div>
               <Clock3 size={17} className="text-cream/50" />
@@ -427,6 +506,16 @@ export default function CustomerRide() {
             <RideTimeline ride={booking} />
           </Card>
 
+          {awaitingRider || riderOnWay ? (
+            <Button variant="outline" block onClick={() => {
+              ++reverseRevision.current;
+              setNewDestination(null);
+              setEditOpen(true);
+            }} icon={<MapPin size={17} />}>
+              Edit destination
+            </Button>
+          ) : null}
+
           {awaitingRider ? (
             <Button
               variant="outline"
@@ -474,23 +563,53 @@ export default function CustomerRide() {
         </div>
       </div>
 
-      <ConfirmDialog
-        open={cancelOpen}
-        onClose={() => setCancelOpen(false)}
-        title={cancelFeeApplies ? 'Cancel this ride?' : 'Cancel this request?'}
-        body={
-          cancelFeeApplies
-            ? `A rider has already accepted. A cancellation fee of up to ${money(
-                booking.fare.cancellationFee || 0,
-              )} may apply, and it will be shown on the receipt.`
-            : 'No rider has been charged for this request. You will not pay anything.'
-        }
-        confirmLabel="Cancel ride"
-        cancelLabel="Keep ride"
-        tone="danger"
-        loading={cancelling}
-        onConfirm={() => void cancel()}
-      />
+      <Sheet open={cancelOpen} onClose={() => !cancelling && setCancelOpen(false)} title="Cancel booking?" footer={
+        <div className="flex gap-2">
+          <Button variant="outline" block onClick={() => setCancelOpen(false)} disabled={cancelling}>Keep booking</Button>
+          <Button variant="danger" block loading={cancelling} disabled={!reason || !cancelQuote.data || cancelQuote.loading || Boolean(cancelQuote.error) || (reason === 'Other reason.' && !otherReason.trim())} onClick={() => void cancel()}>Cancel booking</Button>
+        </div>
+      }>
+        <div className="space-y-3">
+          <Field label="Why are you cancelling?">
+            <Select value={reason} onChange={(event) => setReason(event.target.value)}>
+              <option value="">Choose a reason</option>
+              {cancellationReasons.map((text) => <option key={text} value={text}>{text}</option>)}
+            </Select>
+          </Field>
+          {reason === 'Other reason.' ? <Textarea value={otherReason} maxLength={300} onChange={(event) => setOtherReason(event.target.value)} placeholder="Tell us the reason" /> : null}
+          <p role="status" className="text-[14px] text-ink">
+            {cancelQuote.loading ? 'Checking cancellation fee…' : cancelQuote.error ?? (cancelQuote.data ? `Cancellation fee: ${money(cancelQuote.data.fee, cancelQuote.data.currency)}` : '')}
+          </p>
+          {cancelQuote.error ? <Button variant="outline" onClick={cancelQuote.reload}>Retry</Button> : null}
+        </div>
+      </Sheet>
+
+      <Sheet open={editOpen} onClose={() => !updating && setEditOpen(false)} title="Edit destination" description="Your booking stays active. Review the new fare before confirming." footer={
+        <Button block loading={updating} disabled={!quote} onClick={() => void changeDestination()}>
+          {quote ? `Confirm new destination · ${money(quote.fare.estimated, quote.currency)}` : 'Choose a new destination'}
+        </Button>
+      }>
+        <div className="space-y-3">
+          <p className="text-[13px] text-muted">Current destination: {booking.destination.label}</p>
+          <Button variant="outline" block onClick={() => setEditSearch(true)}>Search destination</Button>
+          <Button variant="outline" block onClick={() => setEditPin(true)}>Select on map</Button>
+          {newDestination ? <p className="text-[15px] font-semibold">{newDestination.label}</p> : null}
+          {destinationQuote.loading ? <p role="status">Calculating new route and fare…</p> : null}
+          {destinationQuote.error ? <p role="alert" className="text-danger">{destinationQuote.error}</p> : null}
+          {quote ? (
+            <Card>
+              <p className="text-[14px]">Old fare: {money(booking.fare.estimated, booking.fare.currency)}</p>
+              <p className="mt-1 text-[18px] font-semibold">New fare: {money(quote.fare.estimated, quote.currency)}</p>
+              <p className="mt-1 text-[13px] text-muted">{km(quote.route.distanceMeters)} · {minutes(quote.route.durationSeconds)}</p>
+            </Card>
+          ) : null}
+        </div>
+      </Sheet>
+      <PlaceSearch open={editSearch} onClose={() => setEditSearch(false)} title="Search destination" current={newDestination ?? booking.destination} allowCurrentLocation={false} onSelect={(place) => {
+        ++reverseRevision.current;
+        setNewDestination(place);
+      }} onDropPin={() => setEditPin(true)} />
+      {editPin ? <LocationPicker open initial={newDestination ?? booking.destination} target="destination" onClose={() => setEditPin(false)} onConfirm={(point) => void selectDestinationPin(point)} /> : null}
 
       <div className="sr-only" aria-live="polite">
         {booking.status === 'ACCEPTED' ? 'A rider accepted your request.' : null}

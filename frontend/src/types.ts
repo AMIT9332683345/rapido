@@ -170,6 +170,7 @@ export interface Booking {
   declinedRiders?: string[];
   finalDistanceMeters?: number | null;
   customerNote?: string | null;
+  matching?: { nearby: number; notified: number; accepted: number; declined: number };
 }
 
 export interface NearbyRider {

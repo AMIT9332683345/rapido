@@ -15,6 +15,7 @@ import { Eye, EyeOff, Loader2, X } from 'lucide-react';
 import type { RideStatus } from '../types';
 import { statusLabel, statusTone } from '../lib/format';
 import { fetchPrivateImage } from '../lib/api';
+import { APP_NAME } from '../config';
 
 export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -31,7 +32,7 @@ export function BrandMark({ size = 36, rounded = 12 }: { size?: number; rounded?
       height={size}
       viewBox="0 0 64 64"
       role="img"
-      aria-label="Amit"
+      aria-label={APP_NAME}
       style={{ borderRadius: rounded, display: 'block' }}
     >
       <rect width="64" height="64" rx="14" fill="#08211f" />
@@ -60,7 +61,7 @@ export function Wordmark({ tone = 'dark' }: { tone?: 'dark' | 'light' }) {
           tone === 'light' ? 'text-cream' : 'text-ink',
         )}
       >
-        Amit<span className="text-mango">.</span>
+        {APP_NAME}<span className="text-mango">.</span>
       </span>
     </span>
   );

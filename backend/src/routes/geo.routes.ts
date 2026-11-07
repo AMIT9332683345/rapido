@@ -6,7 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { HttpError } from '../utils/httpError.js';
 import { isValidLatLng } from '../utils/geo.js';
 import { findNearbyRiders, reverseGeocode, searchPlaces } from '../services/geoService.js';
-import { assertBookablePoint, getActiveServiceArea } from '../services/settingsService.js';
+import { assertBookablePoint, assertRouteInServiceArea, getActiveServiceArea } from '../services/settingsService.js';
 import { getRoadRoute } from '../services/routingService.js';
 import { calculateFare, getFareConfig } from '../services/fareService.js';
 import { env } from '../config/env.js';
@@ -33,7 +33,7 @@ router.get(
   }),
 );
 
-router.use(authenticate, geoLimiter);
+router.use(geoLimiter);
 
 router.get(
   '/search',
@@ -76,7 +76,7 @@ router.post(
       })
       .parse(req.body);
 
-    await Promise.all([
+    const [area] = await Promise.all([
       assertBookablePoint(body.pickup.lat, body.pickup.lng),
       assertBookablePoint(body.destination.lat, body.destination.lng),
     ]);
@@ -85,6 +85,7 @@ router.post(
       { lat: body.pickup.lat, lng: body.pickup.lng },
       { lat: body.destination.lat, lng: body.destination.lng },
     );
+    assertRouteInServiceArea(area, route);
     const config = await getFareConfig();
     const fare = calculateFare(config, route.distanceMeters, route.durationSeconds);
 
@@ -96,6 +97,8 @@ router.post(
     });
   }),
 );
+
+router.use(authenticate);
 
 router.get(
   '/nearby-riders',

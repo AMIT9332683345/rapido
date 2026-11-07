@@ -24,6 +24,6 @@ export function RequireRole({ role }: { role: Role }) {
 
 export function SessionGate({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
-  if (!session) return <FullPageLoader label="Opening Amit…" />;
+  if (!session) return <FullPageLoader label="Opening Flash…" />;
   return <>{children}</>;
 }
