@@ -69,12 +69,23 @@ export const env = parsed.data;
 export const isProd = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
 
+// Browsers send Origin as scheme://host[:port] with no path or trailing slash.
+function toOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value.replace(/\/+$/, '');
+  }
+}
+
 export const allowedOrigins = [
   env.FRONTEND_URL,
-  ...(env.FRONTEND_URLS ? env.FRONTEND_URLS.split(',').map((s) => s.trim()) : []),
+  ...(env.FRONTEND_URLS ? env.FRONTEND_URLS.split(',') : []),
   ...(isProd ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173']),
 ]
+  .map((v) => v.trim())
   .filter(Boolean)
+  .map(toOrigin)
   .filter((v, i, arr) => arr.indexOf(v) === i);
 
 if (isProd && env.OSRM_BASE_URL.includes('router.project-osrm.org')) {
